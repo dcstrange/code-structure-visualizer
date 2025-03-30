@@ -8,13 +8,17 @@
     "build": "vite build",
     "build:echarts": "VISUALIZER=echarts vite build",
     "build:cytoscape": "VISUALIZER=cytoscape vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "clean": "rimraf dist .vite",
+    "clean:cache": "rimraf node_modules/.vite .cache && npm cache clean --force",
+    "clean:all": "rimraf node_modules dist .vite .cache && npm cache clean --force"
   },
   "dependencies": {
     "cytoscape": "^3.25.0",
     "echarts": "^5.4.3"
   },
   "devDependencies": {
+    "rimraf": "^6.0.1",
     "vite": "^4.4.9"
   },
   "author": "",
