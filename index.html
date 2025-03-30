@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>代码结构可视化</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <div class="header">
+      <h1>代码结构解析器</h1>
+      <p>分析代码元素间的关系与依赖</p>
+    </div>
+    
+    <div class="controls">
+      <div class="control-group">
+        <button id="startAnalysis">开始分析</button>
+        <button id="stopAnalysis">停止分析</button>
+        <button id="continueAnalysis" disabled>深入分析</button>
+        <button id="resetView">重置视图</button>
+      </div>
+      
+      <div class="control-group">
+        <div class="thread-selection">
+          <span>线程数</span>
+          <select id="threadCount">
+            <option value="1">1</option>
+            <option value="3" selected>3</option>
+            <option value="5">5</option>
+          </select>
+        </div>
+        
+        <div class="analysis-options">
+          <span>策略</span>
+          <select id="analysisMode">
+            <option value="progressive">递进式</option>
+            <option value="complete">完整分析</option>
+          </select>
+        </div>
+        
+        <div class="visualizer-options">
+          <span>可视化引擎</span>
+          <select id="visualizerType">
+            <option value="echarts" selected>ECharts</option>
+            <option value="cytoscape">Cytoscape</option>
+          </select>
+        </div>
+      </div>
+      
+      <div id="status">系统就绪，等待分析指令</div>
+    </div>
+    
+    <div class="main-content">
+      <div class="filter-panel" id="filter-panel">
+        <!-- 由filters.js动态生成 -->
+      </div>
+      
+      <div class="graph-container">
+        <div id="container"></div>
+        <div id="reveal-info" style="display: none;">代码结构解析进度: 0%</div>
+        <div class="mini-map">
+          <div id="mini-map-container"></div>
+        </div>
+        <div class="zoom-controls">
+          <button id="zoom-in">+</button>
+          <button id="zoom-out">-</button>
+          <button id="zoom-fit">⟲</button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="stats-panel" id="stats-panel">
+      <!-- 由statistics.js动态生成 -->
+    </div>
+  </div>
+  
+  <!-- 按顺序加载模块化JavaScript -->
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
