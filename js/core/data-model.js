@@ -118,6 +118,7 @@ export class DataModel {
     });
     
     // 通知视图更新节点
+    console.log(`生成了 ${this.nodes.length} 个节点`); // 添加日志
     this.eventBus.emit('nodes-updated', this.nodes);
     return this;
   }
@@ -140,33 +141,88 @@ export class DataModel {
       for (let i = 0; i < callCount; i++) {
         const target = functionNodes[Math.floor(Math.random() * functionNodes.length)];
         if (source.id !== target.id) {
-          this.links.push({
-            source: source.id,
-            target: target.id,
-            sourceType: 'function',
-            targetType: 'function',
-            originalColor: '#5470c6',
-            color: '#aaaaaa', // 初始为灰色
-            width: 1,
-            opacity: 0.6,
-            curveness: 0.2,
-            type: 'solid',
-            symbol: ['none', 'arrow'],
-            symbolSize: [0, 5],
-            hidden: false
-          });
+          this._createLink(source, target, '#5470c6');
         }
       }
     });
     
-    // 更多连接类型...（函数使用变量、类包含函数等）
-    // 为简洁起见，省略其他连接类型的代码，实际实现应包含所有类型
+    // 函数使用变量
+    functionNodes.forEach(source => {
+      if (variableNodes.length === 0) return;
+      
+      const useCount = Math.floor(Math.random() * 3);
+      for (let i = 0; i < useCount; i++) {
+        const target = variableNodes[Math.floor(Math.random() * variableNodes.length)];
+        this._createLink(source, target, '#91cc75');
+      }
+    });
+    
+    // 类包含函数
+    classNodes.forEach(source => {
+      if (functionNodes.length === 0) return;
+      
+      const methodCount = Math.floor(Math.random() * 4) + 1;
+      for (let i = 0; i < methodCount; i++) {
+        const target = functionNodes[Math.floor(Math.random() * functionNodes.length)];
+        this._createLink(source, target, '#fac858');
+      }
+    });
+    
+    // 类使用typedef
+    classNodes.forEach(source => {
+      if (typedefNodes.length === 0) return;
+      
+      const useTypeCount = Math.floor(Math.random() * 2) + 1;
+      for (let i = 0; i < useTypeCount; i++) {
+        const target = typedefNodes[Math.floor(Math.random() * typedefNodes.length)];
+        this._createLink(source, target, '#ee6666');
+      }
+    });
+    
+    // 函数使用宏
+    functionNodes.forEach(source => {
+      if (macroNodes.length === 0) return;
+      
+      if (Math.random() > 0.7) { // 30%概率使用宏
+        const target = macroNodes[Math.floor(Math.random() * macroNodes.length)];
+        this._createLink(source, target, '#73c0de');
+      }
+    });
+    
+    // 函数调用API
+    functionNodes.forEach(source => {
+      if (apiNodes.length === 0) return;
+      
+      if (Math.random() > 0.6) { // 40%概率调用API
+        const target = apiNodes[Math.floor(Math.random() * apiNodes.length)];
+        this._createLink(source, target, '#fc8452');
+      }
+    });
     
     // 通知视图更新连接
     this.eventBus.emit('links-updated', this.links);
     return this;
   }
   
+  // 添加辅助方法创建连接
+  _createLink(source, target, color) {
+    this.links.push({
+      source: source.id,
+      target: target.id,
+      sourceType: source.nodeType,
+      targetType: target.nodeType,
+      originalColor: color,
+      color: '#aaaaaa', // 初始为灰色
+      width: 1,
+      opacity: 0.6,
+      curveness: 0.2,
+      type: 'solid',
+      symbol: ['none', 'arrow'],
+      symbolSize: [0, 5],
+      hidden: false
+    });
+  }
+
   /**
    * 生成节点坐标
    */
@@ -206,6 +262,8 @@ export class DataModel {
     
     // 通知视图更新
     this.eventBus.emit('node-status-updated', nodeId, status, progress, phase);
+    // 同时更新与此节点相关的边的状态
+    //this.updateEdgeStatusByNodes(nodeId);
     // 计算总进度
     this.calculateTotalProgress();
     
@@ -258,7 +316,7 @@ export class DataModel {
     this.eventBus.emit('visibility-updated', this.nodes, this.links);
     return this;
   }
-  
+
   /**
    * 重置所有节点状态
    */

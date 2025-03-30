@@ -1,6 +1,25 @@
 import { Visualizer } from './visualizer.js';
 import { mixColors } from '../utils/color-utils.js';
 
+// 尝试获取echarts对象，支持不同的加载方式
+let echartsLib;
+try {
+  // 方式1: 全局变量（如通过script标签加载）
+  if (typeof window.echarts !== 'undefined') {
+    echartsLib = window.echarts;
+  }
+  // 方式2: 如果以ESM方式导入echarts
+  else {
+    // 动态导入echarts，这将创建一个懒加载的chunk
+    // 注意：这段代码在不支持动态导入的环境中会失败
+    import('echarts').then(module => {
+      echartsLib = module;
+    });
+  }
+} catch (e) {
+  console.error("尝试加载ECharts时出错:", e);
+}
+
 /**
  * ECharts适配器 - 将通用API转换为ECharts特定实现
  */
@@ -25,103 +44,117 @@ export class EChartsAdapter extends Visualizer {
    * 初始化ECharts图表
    */
   initialize() {
-    // 确保加载了ECharts库
-    if (typeof echarts === 'undefined') {
+    // 防御性检查
+    if (!echartsLib && typeof echarts === 'undefined') {
       console.error('ECharts库未加载');
       this.eventBus.emit('visualization-error', 'ECharts库未加载');
       return this;
     }
+    // 使用已确认可用的echarts
+    const echart = echartsLib || echarts;
+
+    // 检查容器
+    if (!this.container) {
+      console.error('图表容器不存在');
+      this.eventBus.emit('visualization-error', '图表容器不存在');
+      return this;
+    }
     
     // 初始化主图表
-    this.chart = echarts.init(this.container);
-    
-    // 初始化选项
-    const option = {
-      backgroundColor: '#1e1e2e',
-      tooltip: {
-        formatter: (params) => this._formatTooltip(params)
-      },
-      animation: true,
-      animationDuration: 500,
-      series: [
-        {
-          type: 'graph',
-          layout: 'none',
-          data: [],
-          links: [],
-          roam: 'move',
-          draggable: true,
-          zoom: this.currentZoom,
-          scaleLimit: {
-            min: this.minZoom,
-            max: this.maxZoom
-          },
-          center: [400, 300],
-          focusNodeAdjacency: true,
-          itemStyle: {
-            shadowBlur: 10,
-            shadowColor: 'rgba(0, 0, 0, 0.3)'
-          },
-          lineStyle: {
-            width: 1,
-            curveness: 0.2,
-            opacity: 0.6
-          },
-          label: {
-            position: 'bottom',
-            distance: 5,
-            fontSize: 12,
-            fontFamily: 'JetBrains Mono, monospace'
-          },
-          emphasis: {
-            scale: true,
-            focus: 'adjacency',
-            lineStyle: {
-              width: 2
-            },
-            label: {
-              fontWeight: 'bold'
-            }
-          },
-          edgeSymbol: ['none', 'arrow'],
-          edgeSymbolSize: [0, 5],
-          edgeLabel: {
-            show: false
-          }
-        }
-      ]
-    };
-    
-    this.chart.setOption(option);
-    
-    // 初始化小地图
-    if (this.miniMapContainer) {
-      this.miniMap = echarts.init(this.miniMapContainer);
-      const miniMapOption = {
-        backgroundColor: 'transparent',
-        animation: false,
-        tooltip: { show: false },
+    try {
+      this.chart = echarts.init(this.container);
+      console.log("ECharts初始化成功");
+      
+      // 初始化选项
+      const option = {
+        backgroundColor: '#1e1e2e',
+        tooltip: {
+          formatter: (params) => this._formatTooltip(params)
+        },
+        animation: true,
+        animationDuration: 500,
         series: [
           {
             type: 'graph',
             layout: 'none',
             data: [],
             links: [],
-            roam: false,
-            zoom: 0.5,
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0
+            roam: 'move',
+            draggable: true,
+            zoom: this.currentZoom,
+            scaleLimit: {
+              min: this.minZoom,
+              max: this.maxZoom
+            },
+            center: [400, 300],
+            focusNodeAdjacency: true,
+            itemStyle: {
+              shadowBlur: 10,
+              shadowColor: 'rgba(0, 0, 0, 0.3)'
+            },
+            lineStyle: {
+              width: 1,
+              curveness: 0.2,
+              opacity: 0.6
+            },
+            label: {
+              position: 'bottom',
+              distance: 5,
+              fontSize: 12,
+              fontFamily: 'JetBrains Mono, monospace'
+            },
+            emphasis: {
+              scale: true,
+              focus: 'adjacency',
+              lineStyle: {
+                width: 2
+              },
+              label: {
+                fontWeight: 'bold'
+              }
+            },
+            edgeSymbol: ['none', 'arrow'],
+            edgeSymbolSize: [0, 5],
+            edgeLabel: {
+              show: false
+            }
           }
         ]
       };
-      this.miniMap.setOption(miniMapOption);
+      
+      this.chart.setOption(option);
+      
+      // 初始化小地图
+      if (this.miniMapContainer) {
+        this.miniMap = echarts.init(this.miniMapContainer);
+        const miniMapOption = {
+          backgroundColor: 'transparent',
+          animation: false,
+          tooltip: { show: false },
+          series: [
+            {
+              type: 'graph',
+              layout: 'none',
+              data: [],
+              links: [],
+              roam: false,
+              zoom: 0.5,
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0
+            }
+          ]
+        };
+        this.miniMap.setOption(miniMapOption);
+      }
+      
+      // 添加事件监听
+      this._setupEventListeners();
+    } catch (error) {
+      console.error("初始化ECharts时出错:", error);
+      this.eventBus.emit('visualization-error', `初始化图表失败: ${error.message}`);
     }
-    
-    // 添加事件监听
-    this._setupEventListeners();
-    
     return this;
   }
   
@@ -306,19 +339,95 @@ export class EChartsAdapter extends Visualizer {
   resetView() {
     if (!this.chart) return this;
     
-    this.chart.dispatchAction({
-      type: 'restore'
-    });
-    
-    this.currentZoom = this.defaultZoom;
-    this.chart.setOption({
-      series: [{
-        zoom: this.currentZoom
-      }]
-    });
-    
-    this.updateMiniMap();
-    this.updateElementPositions();
+    try {
+      console.log("重置视图开始");
+      
+      // 获取当前数据
+      const option = this.chart.getOption();
+      if (!option || !option.series || !option.series[0]) {
+        console.error("无法获取图表选项");
+        return this;
+      }
+      
+      // 保存现有数据
+      const nodes = option.series[0].data || [];
+      const links = option.series[0].links || [];
+      
+      console.log(`重置视图: 保存了 ${nodes.length} 个节点和 ${links.length} 个连接`);
+      
+      // 重置缩放
+      this.currentZoom = this.defaultZoom;
+      
+      // 创建完整的新选项，确保保留所有数据
+      const newOption = {
+        backgroundColor: option.backgroundColor,
+        tooltip: option.tooltip,
+        animation: true,
+        animationDuration: 500,
+        series: [{
+          type: 'graph',
+          layout: 'none',
+          data: nodes,  // 保留原始节点
+          links: links, // 保留原始连接
+          roam: 'move',
+          draggable: true,
+          zoom: this.defaultZoom,
+          center: [400, 300],  // 重置中心点
+          focusNodeAdjacency: true,
+          scaleLimit: {
+            min: this.minZoom,
+            max: this.maxZoom
+          },
+          label: {
+            position: 'bottom',
+            distance: 5,
+            fontSize: 12,
+            fontFamily: 'JetBrains Mono, monospace'
+          },
+          itemStyle: {
+            shadowBlur: 10,
+            shadowColor: 'rgba(0, 0, 0, 0.3)'
+          },
+          lineStyle: {
+            width: 1,
+            curveness: 0.2,
+            opacity: 0.6
+          },
+          emphasis: {
+            scale: true,
+            focus: 'adjacency',
+            lineStyle: {
+              width: 2
+            },
+            label: {
+              fontWeight: 'bold'
+            }
+          },
+          edgeSymbol: ['none', 'arrow'],
+          edgeSymbolSize: [0, 5],
+          edgeLabel: {
+            show: false
+          }
+        }]
+      };
+      
+      // 使用完整选项重置图表
+      this.chart.setOption(newOption, {
+        replaceMerge: ['series']
+      });
+      
+      console.log("图表已使用新选项重置");
+      
+      // 更新小地图
+      this.updateMiniMap();
+      
+      // 更新DOM元素位置
+      this.updateElementPositions();
+      
+      console.log("重置视图完成");
+    } catch (error) {
+      console.error("重置视图时出错:", error);
+    }
     
     return this;
   }
@@ -338,37 +447,52 @@ export class EChartsAdapter extends Visualizer {
   initProgressElements() {
     // 清理旧元素
     this._clearProgressElements();
+    // 检查图表实例是否可用
+    if (!this.chart) {
+      console.warn("无法初始化进度元素: 图表实例不可用");
+      return this;
+    }
+    try {
+      // 获取当前图表数据
+      const option = this.chart.getOption();
+      // 确保option和series存在
+      if (!option || !option.series || !option.series[0] || !option.series[0].data) {
+        console.warn("无法初始化进度元素: 图表数据不可用");
+        return this;
+      }
+      
+      const nodes = option.series[0].data;
+      
+      // 为每个节点创建进度条
+      nodes.forEach(node => {
+        const domPos = this.convertToScreenCoordinates(node.x, node.y);
+        if (!domPos) return;
+        
+        // 进度条容器
+        const progressBarContainer = document.createElement('div');
+        progressBarContainer.className = 'progress-bar-container';
+        progressBarContainer.style.left = (domPos[0] - 15) + 'px';
+        progressBarContainer.style.top = (domPos[1] + 15) + 'px';
+        progressBarContainer.style.width = '30px';
+        progressBarContainer.dataset.display = 'none';
+        
+        // 进度条填充
+        const progressBarFill = document.createElement('div');
+        progressBarFill.className = 'progress-bar-fill';
+        
+        progressBarContainer.appendChild(progressBarFill);
+        this.container.appendChild(progressBarContainer);
+        
+        // 存储进度条引用
+        this.progressBars[node.id] = progressBarContainer;
+        
+        // 初始状态为隐藏
+        progressBarContainer.style.display = 'none';
+      });
+    } catch (error) {
+      console.error("初始化进度元素时出错:", error);
+    }
     
-    // 获取当前图表数据
-    const option = this.chart.getOption();
-    const nodes = option.series[0].data;
-    
-    // 为每个节点创建进度条
-    nodes.forEach(node => {
-      const domPos = this.convertToScreenCoordinates(node.x, node.y);
-      if (!domPos) return;
-      
-      // 进度条容器
-      const progressBarContainer = document.createElement('div');
-      progressBarContainer.className = 'progress-bar-container';
-      progressBarContainer.style.left = (domPos[0] - 15) + 'px';
-      progressBarContainer.style.top = (domPos[1] + 15) + 'px';
-      progressBarContainer.style.width = '30px';
-      progressBarContainer.dataset.display = 'none';
-      
-      // 进度条填充
-      const progressBarFill = document.createElement('div');
-      progressBarFill.className = 'progress-bar-fill';
-      
-      progressBarContainer.appendChild(progressBarFill);
-      this.container.appendChild(progressBarContainer);
-      
-      // 存储进度条引用
-      this.progressBars[node.id] = progressBarContainer;
-      
-      // 初始状态为隐藏
-      progressBarContainer.style.display = 'none';
-    });
     
     return this;
   }

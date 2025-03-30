@@ -1,22 +1,23 @@
 {
-    "name": "code-structure-visualizer",
-    "version": "1.0.0",
-    "description": "可视化代码结构与依赖关系",
-    "main": "index.js",
-    "scripts": {
-      "start": "vite",
-      "build": "vite build",
-      "build:echarts": "VISUALIZER=echarts vite build",
-      "build:cytoscape": "VISUALIZER=cytoscape vite build",
-      "preview": "vite preview"
-    },
-    "dependencies": {
-      "echarts": "^5.4.3",
-      "cytoscape": "^3.25.0"
-    },
-    "devDependencies": {
-      "vite": "^4.4.9"
-    },
-    "author": "",
-    "license": "MIT"
-  }
+  "name": "code-structure-visualizer",
+  "version": "1.0.0",
+  "description": "可视化代码结构与依赖关系",
+  "main": "index.js",
+  "scripts": {
+    "start": "vite",
+    "build": "vite build",
+    "build:echarts": "VISUALIZER=echarts vite build",
+    "build:cytoscape": "VISUALIZER=cytoscape vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "cytoscape": "^3.25.0",
+    "echarts": "^5.4.3"
+  },
+  "devDependencies": {
+    "vite": "^4.4.9"
+  },
+  "author": "",
+  "license": "MIT",
+  "keywords": []
+}

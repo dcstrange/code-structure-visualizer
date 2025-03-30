@@ -40,51 +40,96 @@ class App {
    * 初始化应用
    */
   initialize() {
-    // 创建可视化实例
-    this._createVisualizer(this.currentVisualizerType);
-    
-    // 初始化UI组件
-    this.controls.initialize();
-    this.filters.initialize();
-    this.statistics.initialize();
-    
-    // 加载节点类型配置
-    this.eventBus.emit('node-types-loaded', getNodeTypeConfig());
-    
-    // 生成数据
-    this.dataModel.generateData();
-    
-    console.log('应用初始化完成');
+    try {
+      console.log("开始初始化应用");
+      
+      // 加载节点类型配置
+      this.eventBus.emit('node-types-loaded', getNodeTypeConfig());
+      console.log("节点类型配置已加载");
+      
+      // 延迟创建可视化实例，确保DOM和依赖已加载
+      setTimeout(() => {
+        try {
+          this._createVisualizer(this.currentVisualizerType);
+          console.log("可视化实例已创建");
+          
+          // 初始化UI组件
+          this.controls.initialize();
+          this.filters.initialize();
+          this.statistics.initialize();
+          console.log("UI组件已初始化");
+          
+          // 生成数据
+          this.dataModel.generateData();
+          console.log("数据已生成:", this.dataModel.nodes.length, "个节点");
+          
+          // 如果可视化已就绪，更新数据
+          if (this.visualizer && this.visualizer.chart) {
+            this.visualizer.updateNodes(this.dataModel.nodes);
+            this.visualizer.updateLinks(this.dataModel.links);
+          }
+        } catch (e) {
+          console.error("应用初始化期间出错:", e);
+        }
+      }, 100); // 短暂延迟确保DOM已完全加载
+      
+      console.log("初始化流程已启动");
+    } catch (error) {
+      console.error("应用初始化失败:", error);
+    }
     
     return this;
   }
-  
+
   /**
    * 创建可视化实例
    * @private
    */
   _createVisualizer(type) {
-    // 销毁现有可视化实例
-    if (this.visualizer) {
-      this.visualizer.destroy();
+    // 防御性检查
+    if (!this.container) {
+      console.error("无法创建可视化实例: 容器元素不存在");
+      // 尝试重新获取容器
+      this.container = document.getElementById('container');
+      if (!this.container) {
+        console.error("即使重试后仍无法找到容器元素");
+        return;
+      }
     }
     
-    // 创建新的可视化实例
-    this.visualizer = VisualizerFactory.create(
-      type, 
-      this.container, 
-      this.miniMapContainer, 
-      this.eventBus
-    );
+    // 销毁现有可视化实例
+    if (this.visualizer) {
+      try {
+        this.visualizer.destroy();
+      } catch (e) {
+        console.error("销毁现有可视化实例时出错:", e);
+      }
+    }
     
-    // 初始化可视化
-    this.visualizer.initialize();
-    
-    // 更新应用状态
-    this.currentVisualizerType = type;
-    
-    // 初始化进度元素
-    this.visualizer.initProgressElements();
+    try {
+      // 创建新的可视化实例
+      this.visualizer = VisualizerFactory.create(
+        type, 
+        this.container, 
+        this.miniMapContainer, 
+        this.eventBus
+      );
+      
+      // 初始化可视化
+      this.visualizer.initialize();
+      
+      // 更新应用状态
+      this.currentVisualizerType = type;
+      
+      // 安全地初始化进度元素
+      if (this.visualizer.chart) {
+        this.visualizer.initProgressElements();
+      } else {
+        console.warn("跳过进度元素初始化，图表实例尚未准备好");
+      }
+    } catch (error) {
+      console.error("创建可视化实例时出错:", error);
+    }
   }
   
   /**
@@ -109,8 +154,11 @@ class App {
     
     // 监听重置视图请求
     this.eventBus.on('reset-view-requested', () => {
+      console.log("收到重置视图请求");
       if (this.visualizer) {
         this.visualizer.resetView();
+      } else {
+        console.error("无法重置视图: 可视化实例不存在");
       }
     });
     
@@ -206,5 +254,30 @@ class App {
 
 // 应用启动
 document.addEventListener('DOMContentLoaded', () => {
-  window.app = new App().initialize();
+  try {
+    console.log("DOM内容加载完成，开始初始化应用");
+    
+    // 检查关键DOM元素
+    const container = document.getElementById('container');
+    const miniMapContainer = document.getElementById('mini-map-container');
+    
+    console.log("主容器:", container);
+    console.log("小地图容器:", miniMapContainer);
+    
+    // 验证库加载
+    console.log("ECharts库:", typeof echarts);
+    console.log("Cytoscape库:", typeof cytoscape);
+    
+    // 初始化应用
+    window.app = new App().initialize();
+    
+  } catch (error) {
+    console.error("应用初始化失败:", error);
+    document.body.innerHTML = `
+      <div style="color:red; padding:20px;">
+        <h2>初始化错误</h2>
+        <pre>${error.stack}</pre>
+      </div>
+    `;
+  }
 });
