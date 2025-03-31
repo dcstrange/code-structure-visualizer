@@ -38,6 +38,11 @@ export class EChartsAdapter extends Visualizer {
     this.zoomOutButton = document.getElementById('zoom-out');
     this.zoomFitButton = document.getElementById('zoom-fit');
     this.resetViewButton = document.getElementById('resetView');
+    
+    // 监听全局连线更新事件
+    this.eventBus.on('update-all-links', () => {
+      this.updateAllLinks();
+    });
   }
   
   /**
@@ -60,19 +65,26 @@ export class EChartsAdapter extends Visualizer {
       return this;
     }
     
+    // 确保进度条和图标对象已初始化
+    this.progressBars = {};
+    this.analyzeIcons = {};
+    this.phaseIndicators = {};
+    
     // 初始化主图表
     try {
       this.chart = echarts.init(this.container);
       console.log("ECharts初始化成功");
       
-      // 初始化选项
+      // 初始化选项 - 为大量节点优化
       const option = {
         backgroundColor: '#1e1e2e',
         tooltip: {
-          formatter: (params) => this._formatTooltip(params)
+          formatter: (params) => this._formatTooltip(params),
+          enterable: false,
+          confine: true,
+          triggerOn: 'click' // 点击触发，减少触发频率
         },
-        animation: true,
-        animationDuration: 500,
+        animation: false, // 初始禁用动画以提高性能
         series: [
           {
             type: 'graph',
@@ -87,44 +99,50 @@ export class EChartsAdapter extends Visualizer {
               max: this.maxZoom
             },
             center: [400, 300],
-            focusNodeAdjacency: true,
+            focusNodeAdjacency: false, // 关闭高亮相邻节点，提高性能
             itemStyle: {
-              shadowBlur: 10,
-              shadowColor: 'rgba(0, 0, 0, 0.3)'
+              shadowBlur: 2, // 减少阴影模糊半径
+              shadowColor: 'rgba(0, 0, 0, 0.2)'
             },
             lineStyle: {
               width: 1,
-              curveness: 0.2,
-              opacity: 0.6
+              curveness: 0.1, // 减少曲率
+              opacity: 0.4 // 降低不透明度
             },
             label: {
+              show: false, // 默认不显示标签，提高性能
               position: 'bottom',
               distance: 5,
-              fontSize: 12,
+              fontSize: 10,
               fontFamily: 'JetBrains Mono, monospace'
             },
             emphasis: {
-              scale: true,
-              focus: 'adjacency',
+              scale: false, // 禁用缩放效果
+              focus: 'none', // 禁用关联高亮
               lineStyle: {
-                width: 2
+                width: 1.5
               },
               label: {
-                fontWeight: 'bold'
+                show: true // 仅在强调时显示标签
               }
             },
             edgeSymbol: ['none', 'arrow'],
             edgeSymbolSize: [0, 5],
             edgeLabel: {
               show: false
-            }
+            },
+            // 增加大数据量优化选项
+            large: true,
+            largeThreshold: 300, // 超过300个节点时启用大规模绘制优化
+            progressive: 300, // 分批绘制
+            progressiveThreshold: 500 // 节点超过500时启用渐进渲染
           }
         ]
       };
       
       this.chart.setOption(option);
       
-      // 初始化小地图
+      // 初始化小地图 - 简化小地图配置
       if (this.miniMapContainer) {
         this.miniMap = echarts.init(this.miniMapContainer);
         const miniMapOption = {
@@ -142,7 +160,18 @@ export class EChartsAdapter extends Visualizer {
               left: 0,
               top: 0,
               right: 0,
-              bottom: 0
+              bottom: 0,
+              // 简化小地图渲染
+              symbol: 'circle',
+              symbolSize: 2,
+              itemStyle: {
+                borderWidth: 0
+              },
+              lineStyle: {
+                width: 0.1,
+                opacity: 0.2
+              },
+              label: { show: false }
             }
           ]
         };
@@ -151,11 +180,44 @@ export class EChartsAdapter extends Visualizer {
       
       // 添加事件监听
       this._setupEventListeners();
+      
+      // 为大量节点优化的额外初始化
+      this._setupPerformanceOptimizations();
     } catch (error) {
       console.error("初始化ECharts时出错:", error);
       this.eventBus.emit('visualization-error', `初始化图表失败: ${error.message}`);
     }
     return this;
+  }
+  
+  /**
+   * 设置性能优化
+   * @private
+   */
+  _setupPerformanceOptimizations() {
+    // 延迟resize处理
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        if (this.chart) this.chart.resize();
+        if (this.miniMap) this.miniMap.resize();
+      }, 200);
+    });
+    
+    // 减少元素更新频率
+    this.lastElementUpdateTime = 0;
+    
+    // 初始加载完成后开启动画
+    setTimeout(() => {
+      if (this.chart) {
+        this.chart.setOption({
+          animation: true,
+          animationDuration: 300,
+          animationEasing: 'linear'
+        });
+      }
+    }, 2000);
   }
   
   /**
@@ -220,11 +282,29 @@ export class EChartsAdapter extends Visualizer {
    * 更新节点状态
    */
   updateNodeStatus(nodeId, status, progress, phase = null) {
-    // 实现节点状态更新逻辑
-    const progressBar = this.progressBars[nodeId];
-    if (!progressBar) return this;
+    // 防御性检查 - 确保参数有效
+    if (!nodeId || !status) {
+      console.warn("更新节点状态: 无效的参数", nodeId, status);
+      return this;
+    }
     
-    const progressFill = progressBar.firstChild;
+    // 获取节点信息用于日志
+    const node = this._getNodeFromChart(nodeId);
+    
+    // 获取进度条元素
+    const progressBar = this.progressBars[nodeId];
+    if (!progressBar) {
+      console.warn(`未找到节点 ${nodeId} (${node ? node.nodeType : '未知类型'}) 的进度条元素`);
+      return this;
+    }
+    
+    // 确保进度填充元素存在
+    let progressFill = progressBar.firstChild;
+    if (!progressFill) {
+      progressFill = document.createElement('div');
+      progressFill.className = 'progress-bar-fill';
+      progressBar.appendChild(progressFill);
+    }
     
     // 计算颜色渐变程度
     let colorRatio = 0;
@@ -236,7 +316,6 @@ export class EChartsAdapter extends Visualizer {
       colorRatio = Math.min(0.25, (progress / 100) * 0.25);
     } else if (status === 'partial') {
       // 根据完成的阶段计算颜色混合比例
-      const node = this._getNodeFromChart(nodeId);
       if (node) {
         const baseRatio = 0.25;
         const maxPhaseRatio = 0.75;
@@ -244,6 +323,15 @@ export class EChartsAdapter extends Visualizer {
       }
     } else if (status === 'completed') {
       colorRatio = 1.0; // 完全显示原始颜色
+    }
+    
+    console.log(`更新节点状态: ${nodeId}, 类型: ${node ? node.nodeType : '未知'}, 状态: ${status}, 进度: ${progress}, 颜色比例: ${colorRatio}`);
+    
+    // 立即更新节点在图表中的状态，确保其properties属性正确
+    if (node) {
+      node.status = status;
+      node.progress = progress;
+      if (phase !== null) node.currentPhase = phase;
     }
     
     // 根据状态更新视觉效果
@@ -281,15 +369,32 @@ export class EChartsAdapter extends Visualizer {
       // 更新节点样式
       this._updateNodeStyle(nodeId, status, colorRatio);
       
-      // 隐藏进度条
+      // 直接存储对进度条元素的引用
+      const pb = progressBar;
+      
+      // 直接执行隐藏进度条逻辑，不使用立即执行函数
+      console.log(`准备隐藏节点 ${nodeId} (${node.nodeType || '未知类型'}) 的进度条`);
+      
+      // 第一个延时 - 等待一小段时间后开始淡出
       setTimeout(() => {
-        progressBar.style.opacity = '0';
-        progressBar.style.transition = 'opacity 0.5s';
-        setTimeout(() => {
-          progressBar.style.display = 'none';
-          progressBar.dataset.display = 'none';
-          progressBar.style.opacity = '1';
-        }, 500);
+        if (pb && pb.style) {
+          console.log(`开始淡出节点 ${nodeId} 的进度条`);
+          pb.style.opacity = '0';
+          pb.style.transition = 'opacity 0.5s';
+          
+          // 第二个延时 - 淡出完成后隐藏元素
+          setTimeout(() => {
+            if (pb && pb.style) {
+              console.log(`完全隐藏节点 ${nodeId} 的进度条`);
+              pb.style.display = 'none';
+              pb.dataset.display = 'none';
+              pb.style.opacity = '1';
+              
+              // 检查是否正确隐藏
+              console.log(`节点 ${nodeId} 进度条显示状态: ${pb.style.display}`);
+            }
+          }, 500);
+        }
       }, 500);
       
     } else if (status === 'pending') {
@@ -447,11 +552,13 @@ export class EChartsAdapter extends Visualizer {
   initProgressElements() {
     // 清理旧元素
     this._clearProgressElements();
+    
     // 检查图表实例是否可用
     if (!this.chart) {
       console.warn("无法初始化进度元素: 图表实例不可用");
       return this;
     }
+    
     try {
       // 获取当前图表数据
       const option = this.chart.getOption();
@@ -463,36 +570,80 @@ export class EChartsAdapter extends Visualizer {
       
       const nodes = option.series[0].data;
       
+      console.log(`正在为 ${nodes.length} 个节点创建进度条元素...`);
+      
       // 为每个节点创建进度条
       nodes.forEach(node => {
-        const domPos = this.convertToScreenCoordinates(node.x, node.y);
-        if (!domPos) return;
+        if (!node || !node.id) {
+          console.warn("跳过无效节点");
+          return;
+        }
         
-        // 进度条容器
+        const nodeId = node.id;
+        
+        // 转换节点坐标到屏幕坐标
+        let x = node.x;
+        let y = node.y;
+        if (node.value && Array.isArray(node.value) && node.value.length >= 2) {
+          x = node.value[0];
+          y = node.value[1];
+        }
+        
+        const domPos = this.convertToScreenCoordinates(x, y);
+        if (!domPos) {
+          console.warn(`无法获取节点 ${nodeId} 的屏幕坐标`);
+          return;
+        }
+        
+        // 清理可能已存在的进度条元素
+        if (this.progressBars[nodeId] && this.progressBars[nodeId].parentNode) {
+          this.progressBars[nodeId].parentNode.removeChild(this.progressBars[nodeId]);
+          delete this.progressBars[nodeId];
+        }
+        
+        // 创建新的进度条容器
         const progressBarContainer = document.createElement('div');
         progressBarContainer.className = 'progress-bar-container';
+        progressBarContainer.style.position = 'absolute';
         progressBarContainer.style.left = (domPos[0] - 15) + 'px';
         progressBarContainer.style.top = (domPos[1] + 15) + 'px';
         progressBarContainer.style.width = '30px';
+        progressBarContainer.style.height = '4px';
+        progressBarContainer.style.backgroundColor = '#444444';
+        progressBarContainer.style.borderRadius = '2px';
+        progressBarContainer.style.overflow = 'hidden';
+        progressBarContainer.style.zIndex = '100';
+        progressBarContainer.dataset.nodeId = nodeId;
+        progressBarContainer.dataset.nodeType = node.nodeType;
         progressBarContainer.dataset.display = 'none';
         
         // 进度条填充
         const progressBarFill = document.createElement('div');
         progressBarFill.className = 'progress-bar-fill';
+        progressBarFill.style.height = '100%';
+        progressBarFill.style.width = '0%';
+        progressBarFill.style.backgroundColor = node.originalColor || node.originColor || '#aaaaaa';
+        progressBarFill.style.transition = 'width 0.2s ease-in-out';
         
         progressBarContainer.appendChild(progressBarFill);
         this.container.appendChild(progressBarContainer);
         
         // 存储进度条引用
-        this.progressBars[node.id] = progressBarContainer;
+        this.progressBars[nodeId] = progressBarContainer;
         
         // 初始状态为隐藏
         progressBarContainer.style.display = 'none';
+        
+        // 如果节点已经有状态，立即应用
+        if (node.status && node.status !== 'pending') {
+          this.updateNodeStatus(nodeId, node.status, node.progress || 0, node.currentPhase || 0);
+        }
       });
+      
+      console.log(`成功为 ${Object.keys(this.progressBars).length} 个节点创建了进度条元素`);
     } catch (error) {
       console.error("初始化进度元素时出错:", error);
     }
-    
     
     return this;
   }
@@ -585,40 +736,33 @@ export class EChartsAdapter extends Visualizer {
   updateMiniMap() {
     if (!this.miniMap || !this.chart) return this;
     
-    // 获取主图当前数据
-    const mainOption = this.chart.getOption();
-    if (!mainOption.series || !mainOption.series[0]) return this;
-    
-    const nodes = mainOption.series[0].data;
-    const links = mainOption.series[0].links;
-    
-    // 更新小地图数据
-    this.miniMap.setOption({
-      series: [{
-        zoom: 0.5,
-        data: nodes.map(node => ({
-          ...node,
-          itemStyle: {
-            color: node.status === 'completed' ? node.originalColor : 
-                   node.status === 'partial' ? mixColors('#aaaaaa', node.originalColor, 0.6) :
-                   node.status === 'analyzing' ? mixColors('#aaaaaa', node.originalColor, 0.3) : 
-                   '#aaaaaa',
-            opacity: node.hidden ? 0 : 0.5,
-            borderWidth: 0
-          },
-          symbolSize: 8,
-          label: { show: false }
-        })),
-        links: links.map(link => ({
-          ...link,
-          lineStyle: {
-            ...link.lineStyle,
-            width: link.hidden ? 0 : 0.5,
-            opacity: link.hidden ? 0 : 0.3
-          }
-        }))
-      }]
-    });
+    try {
+      // 获取主图表数据
+      const mainOption = this.chart.getOption();
+      const nodes = mainOption.series[0].data;
+      const links = mainOption.series[0].links;
+      
+      // 更新小地图数据
+      this.miniMap.setOption({
+        series: [{
+          data: nodes,
+          links: links
+        }]
+      });
+      
+      // 标记当前视口范围
+      // 获取当前缩放和平移信息
+      const center = mainOption.series[0].center;
+      const zoom = mainOption.series[0].zoom;
+      
+      // 计算视口矩形
+      const viewWidth = this.container.clientWidth / zoom;
+      const viewHeight = this.container.clientHeight / zoom;
+      
+      // 暂时不实现视口框选，在高级版本中添加
+    } catch (error) {
+      console.error("更新小地图时出错:", error);
+    }
     
     return this;
   }
@@ -662,8 +806,24 @@ export class EChartsAdapter extends Visualizer {
    * @private
    */
   _setupEventListeners() {
-    // 监听图表漫游事件
-    this.chart.on('graphroam', () => {
+    // 防御性检查
+    if (!this.chart) return;
+    
+    // 缩放事件处理
+    this.chart.on('datazoom', (params) => {
+      // 更新DOM元素位置
+      this.updateElementPositions();
+    });
+    
+    // 视图变换事件（缩放、平移）
+    this.chart.on('viewportchange', (params) => {
+      // 更新DOM元素位置
+      this.updateElementPositions();
+    });
+    
+    // 图表缩放事件
+    this.chart.on('graphroam', (params) => {
+      // 更新小地图显示
       this.updateMiniMap();
       
       // 更新当前缩放比例
@@ -672,6 +832,17 @@ export class EChartsAdapter extends Visualizer {
         this.currentZoom = option.series[0].zoom;
       }
       
+      // 更新DOM元素位置
+      this.updateElementPositions();
+    });
+    
+    // 窗口大小变化事件
+    window.addEventListener('resize', () => {
+      // 图表大小调整
+      this.chart.resize();
+      if (this.miniMap) this.miniMap.resize();
+      // 更新小地图
+      this.updateMiniMap();
       // 更新DOM元素位置
       this.updateElementPositions();
     });
@@ -697,11 +868,25 @@ export class EChartsAdapter extends Visualizer {
       }
     });
     
-    // 监听点击节点事件
+    // 节点点击事件
     this.chart.on('click', (params) => {
-      if (params.dataType === 'node') {
-        this.eventBus.emit('node-clicked', params.data.id);
+      if (params.componentType === 'series' && params.dataType === 'node') {
+        // 获取节点ID
+        const nodeId = params.data.id;
+        // 触发节点点击事件
+        this.eventBus.emit('node-clicked', nodeId);
       }
+    });
+    
+    // 布局优化完成事件
+    this.eventBus.on('layout-optimized', () => {
+      console.log('ECharts收到布局优化完成事件');
+      // 强制图表重绘，确保所有位置更新
+      this.chart.resize();
+      // 更新小地图
+      this.updateMiniMap();
+      // 更新DOM元素位置
+      this.updateElementPositions();
     });
   }
   
@@ -710,39 +895,59 @@ export class EChartsAdapter extends Visualizer {
    * @private
    */
   _formatNode(node) {
+    // 防御性检查 - 确保node.label存在
+    const defaultLabel = {
+      show: true,
+      fontSize: 10,
+      fontFamily: 'JetBrains Mono, monospace',
+      color: '#333',
+      fontWeight: 'normal',
+      distance: 5,
+      position: 'bottom'
+    };
+    
+    // 合并默认label和节点自身的label（如果存在）
+    const nodeLabel = node.label || {};
+    const mergedLabel = {...defaultLabel, ...nodeLabel};
+    
+    // 处理节点hidden属性（如果不存在则默认为false）
+    const isHidden = node.hidden || node.visible === false;
+    
     return {
       id: node.id,
       name: node.name,
+      value: node.value || [node.x, node.y],
+      symbolSize: node.symbolSize || 20,
+      symbol: node.symbol || 'circle',
+      itemStyle: node.itemStyle || {
+        color: '#aaaaaa',
+        borderColor: '#888888',
+        borderWidth: 1,
+        opacity: 0.8
+      },
       nodeType: node.nodeType,
       complexity: node.complexity,
       requiredPhases: node.requiredPhases,
       currentPhase: node.currentPhase,
-      symbolSize: node.symbolSize,
-      symbol: node.symbol,
-      itemStyle: {
-        color: node.itemStyle.color,
-        borderColor: node.itemStyle.borderColor,
-        borderWidth: node.itemStyle.borderWidth,
-        opacity: node.hidden ? 0 : node.itemStyle.opacity
-      },
-      originalColor: node.originalColor,
-      originalBorderColor: node.originalBorderColor,
-      x: node.x,
-      y: node.y,
-      fixed: node.fixed,
-      status: node.status,
-      progress: node.progress,
+      // 确保以下属性存在，使用节点自身的属性或默认值
+      originalColor: node.originColor || node.originalColor || '#aaaaaa',
+      originalBorderColor: node.originBorderColor || node.originalBorderColor || '#888888',
+      x: node.x || 0,
+      y: node.y || 0,
+      fixed: node.fixed || false,
+      status: node.status || 'pending',
+      progress: node.progress || 0,
       label: {
-        show: !node.hidden && node.label.show,
+        show: !isHidden && mergedLabel.show,
         formatter: node.name,
-        fontSize: node.label.fontSize,
-        fontFamily: 'JetBrains Mono, monospace',
-        color: node.label.color,
-        fontWeight: node.label.fontWeight,
-        distance: node.label.distance,
-        position: node.label.position
+        fontSize: mergedLabel.fontSize,
+        fontFamily: mergedLabel.fontFamily,
+        color: mergedLabel.color,
+        fontWeight: mergedLabel.fontWeight,
+        distance: mergedLabel.distance,
+        position: mergedLabel.position
       },
-      hidden: node.hidden
+      hidden: isHidden
     };
   }
   
@@ -751,22 +956,37 @@ export class EChartsAdapter extends Visualizer {
    * @private
    */
   _formatLink(link) {
+    // 处理连接hidden属性（如果不存在则默认为false）
+    const isHidden = link.hidden || link.visible === false;
+    
+    // 设置默认的线条样式和属性
+    const defaultLineStyle = {
+      color: '#aaaaaa',
+      width: 1,
+      opacity: 0.6,
+      curveness: 0.2,
+      type: 'solid'
+    };
+    
+    // 合并默认和实际的线条样式
+    const lineStyle = link.lineStyle || {};
+    
     return {
       source: link.source,
       target: link.target,
       sourceType: link.sourceType,
       targetType: link.targetType,
-      originalColor: link.originalColor,
+      originalColor: link.originalColor || '#aaaaaa',
       lineStyle: {
-        color: link.color || link.originalColor,
-        width: link.hidden ? 0 : (link.width || 1),
-        opacity: link.hidden ? 0 : (link.opacity || 0.6),
-        curveness: link.curveness || 0.2,
-        type: link.type || 'solid'
+        color: isHidden ? 'transparent' : (lineStyle.color || link.color || link.originalColor || defaultLineStyle.color),
+        width: isHidden ? 0 : (lineStyle.width || link.width || defaultLineStyle.width),
+        opacity: isHidden ? 0 : (lineStyle.opacity || link.opacity || defaultLineStyle.opacity),
+        curveness: lineStyle.curveness || link.curveness || defaultLineStyle.curveness,
+        type: lineStyle.type || link.type || defaultLineStyle.type
       },
       symbol: link.symbol || ['none', 'arrow'],
       symbolSize: link.symbolSize || [0, 5],
-      hidden: link.hidden
+      hidden: isHidden
     };
   }
   
@@ -832,9 +1052,20 @@ export class EChartsAdapter extends Visualizer {
    * @private
    */
   _getNodeFromChart(nodeId) {
-    const option = this.chart.getOption();
-    const nodes = option.series[0].data;
-    return nodes.find(node => node.id === nodeId);
+    if (!this.chart || !nodeId) return null;
+    
+    try {
+      const option = this.chart.getOption();
+      if (!option || !option.series || !option.series[0] || !option.series[0].data) {
+        return null;
+      }
+      
+      const nodes = option.series[0].data;
+      return nodes.find(node => node && node.id === nodeId) || null;
+    } catch (e) {
+      console.error("获取节点数据时出错:", e);
+      return null;
+    }
   }
   
   /**
@@ -842,46 +1073,63 @@ export class EChartsAdapter extends Visualizer {
    * @private
    */
   _updateNodeStyle(nodeId, status, colorRatio) {
-    const option = this.chart.getOption();
-    const nodes = option.series[0].data;
-    const nodeIndex = nodes.findIndex(node => node.id === nodeId);
-    
-    if (nodeIndex === -1) return;
-    
-    const node = nodes[nodeIndex];
-    let borderColor, borderWidth;
-    
-    if (status === 'analyzing') {
-      borderColor = '#ff4d4f';
-      borderWidth = 2;
-    } else if (status === 'partial') {
-      borderColor = node.currentPhase === 1 ? '#faad14' : '#fa8c16';
-      borderWidth = 2;
-    } else if (status === 'completed') {
-      borderColor = '#52c41a';
-      borderWidth = 2;
-    } else {
-      borderColor = '#888888';
-      borderWidth = 1;
+    if (!this.chart) return;
+  
+    try {
+      const option = this.chart.getOption();
+      if (!option || !option.series || !option.series[0] || !option.series[0].data) return;
+      
+      const nodes = option.series[0].data;
+      const nodeIndex = nodes.findIndex(node => node && node.id === nodeId);
+      
+      if (nodeIndex === -1) {
+        console.warn(`未找到节点 ${nodeId} 进行样式更新`);
+        return;
+      }
+      
+      const node = nodes[nodeIndex];
+      let borderColor, borderWidth;
+      
+      // 根据状态设置不同的边框颜色和宽度
+      if (status === 'analyzing') {
+        borderColor = '#ff4d4f'; // 红色 - 分析中
+        borderWidth = 2;
+      } else if (status === 'partial') {
+        // 部分完成 - 橙色，不同阶段稍微不同色调
+        borderColor = node.currentPhase === 1 ? '#faad14' : '#fa8c16';
+        borderWidth = 2;
+      } else if (status === 'completed') {
+        borderColor = '#52c41a'; // 绿色 - 完成
+        borderWidth = 2;
+      } else {
+        // 默认/待分析 - 灰色
+        borderColor = '#888888';
+        borderWidth = 1;
+      }
+      
+      // 计算当前颜色 - 从灰色到节点原色的过渡
+      const originalColor = node.originalColor || node.originColor || '#aaaaaa';
+      const currentColor = mixColors('#aaaaaa', originalColor, colorRatio);
+      
+      console.log(`更新节点样式: ${nodeId}, 类型: ${node.nodeType || '未知'}, 状态: ${status}, 颜色: ${currentColor}, 边框: ${borderColor}`);
+      
+      // 更新节点样式
+      nodes[nodeIndex].itemStyle = {
+        ...nodes[nodeIndex].itemStyle,
+        color: currentColor,
+        borderColor: borderColor,
+        borderWidth: borderWidth
+      };
+      
+      // 更新图表
+      this.chart.setOption({
+        series: [{
+          data: nodes
+        }]
+      });
+    } catch (error) {
+      console.error(`更新节点 ${nodeId} 样式时出错:`, error);
     }
-    
-    // 计算当前颜色
-    const currentColor = mixColors('#aaaaaa', node.originalColor, colorRatio);
-    
-    // 更新节点样式
-    nodes[nodeIndex].itemStyle = {
-      ...nodes[nodeIndex].itemStyle,
-      color: currentColor,
-      borderColor: borderColor,
-      borderWidth: borderWidth
-    };
-    
-    // 更新图表
-    this.chart.setOption({
-      series: [{
-        data: nodes
-      }]
-    });
   }
   
   /**
@@ -889,52 +1137,97 @@ export class EChartsAdapter extends Visualizer {
    * @private
    */
   _updateRelatedLinks(nodeId) {
-    const option = this.chart.getOption();
-    const nodes = option.series[0].data;
-    const links = option.series[0].links;
+    if (!this.chart || !nodeId) return;
     
-    // 找出与该节点相关的所有边
-    const relatedLinks = links.filter(link => 
-      link.source === nodeId || link.target === nodeId
-    );
-    
-    relatedLinks.forEach(link => {
-      const sourceNode = nodes.find(n => n.id === link.source);
-      const targetNode = nodes.find(n => n.id === link.target);
+    try {
+      const option = this.chart.getOption();
+      if (!option || !option.series || !option.series[0]) return;
       
-      if (!sourceNode || !targetNode) return;
+      const nodes = option.series[0].data || [];
+      const links = option.series[0].links || [];
       
-      // 边的颜色状态取决于源节点和目标节点的状态
-      if (sourceNode.status === 'completed' && targetNode.status === 'completed') {
-        // 如果两个节点都已分析完成，则显示原始颜色
-        link.lineStyle.color = link.originalColor;
-      } else {
-        // 否则计算混合颜色
-        // 根据源节点和目标节点的完成度决定颜色混合比例
-        let sourceRatio = 0, targetRatio = 0;
+      // 找出与该节点相关的所有边
+      const relatedLinks = links.filter(link => 
+        link && (link.source === nodeId || link.target === nodeId)
+      );
+      
+      if (relatedLinks.length === 0) return;
+      
+      // 记录已修改的连线
+      const updatedLinks = [];
+      
+      relatedLinks.forEach(link => {
+        const sourceNode = nodes.find(n => n && n.id === link.source);
+        const targetNode = nodes.find(n => n && n.id === link.target);
         
-        if (sourceNode.status === 'completed') sourceRatio = 1;
-        else if (sourceNode.status === 'partial') sourceRatio = 0.5;
-        else if (sourceNode.status === 'analyzing') sourceRatio = 0.2;
+        if (!sourceNode || !targetNode) return;
         
-        if (targetNode.status === 'completed') targetRatio = 1;
-        else if (targetNode.status === 'partial') targetRatio = 0.5;
-        else if (targetNode.status === 'analyzing') targetRatio = 0.2;
+        // 打印节点状态用于调试
+        console.log(`检查连线: ${sourceNode.id}(${sourceNode.nodeType}) [${sourceNode.status}] → ${targetNode.id}(${targetNode.nodeType}) [${targetNode.status}]`);
         
-        // 取较低的比例
-        const ratio = Math.min(sourceRatio, targetRatio);
+        // 边的颜色状态取决于源节点和目标节点的状态
+        if (sourceNode.status === 'completed' && targetNode.status === 'completed') {
+          // 如果两个节点都已分析完成，则显示原始彩色
+          const linkColor = link.originalColor || '#f39c12'; // 使用原始颜色，如果没有则默认橙色
+          const newWidth = 2;
+          
+          console.log(`连线两端节点均完成，设置为彩色(${linkColor}): ${sourceNode.id} → ${targetNode.id}`);
+          
+          // 直接更改连线对象
+          if (link.lineStyle) {
+            link.lineStyle.color = linkColor;
+            link.lineStyle.width = newWidth;
+            link.lineStyle.opacity = 0.9;
+            link.lineStyle.curveness = 0.2;
+          } else {
+            link.lineStyle = {
+              color: linkColor,
+              width: newWidth,
+              opacity: 0.9,
+              curveness: 0.2
+            };
+          }
+          
+          // 记录已修改的连线
+          updatedLinks.push(link);
+        } else {
+          // 至少有一个节点未完成，使用灰色
+          const baseColor = '#aaaaaa';
+          const baseWidth = 1;
+          
+          // 直接更改连线对象
+          if (link.lineStyle) {
+            link.lineStyle.color = baseColor;
+            link.lineStyle.width = baseWidth;
+            link.lineStyle.opacity = 0.6;
+          } else {
+            link.lineStyle = {
+              color: baseColor,
+              width: baseWidth,
+              opacity: 0.6,
+              curveness: 0.2
+            };
+          }
+          
+          // 记录已修改的连线
+          updatedLinks.push(link);
+        }
+      });
+      
+      // 如果有连线被修改，更新图表
+      if (updatedLinks.length > 0) {
+        console.log(`更新了 ${updatedLinks.length} 条连线样式`);
         
-        // 计算混合颜色
-        link.lineStyle.color = mixColors('#aaaaaa', link.originalColor, ratio);
+        // 更新图表
+        this.chart.setOption({
+          series: [{
+            links: links
+          }]
+        }, false);
       }
-    });
-    
-    // 更新图表
-    this.chart.setOption({
-      series: [{
-        links: links
-      }]
-    });
+    } catch (error) {
+      console.error(`更新与节点 ${nodeId} 相关的连接时出错:`, error);
+    }
   }
   
   /**
@@ -978,23 +1271,142 @@ export class EChartsAdapter extends Visualizer {
    */
   _clearProgressElements() {
     // 清除进度条
-    Object.values(this.progressBars).forEach(el => {
-      if (el && el.parentNode) el.parentNode.removeChild(el);
-    });
+    for (const nodeId in this.progressBars) {
+      const el = this.progressBars[nodeId];
+      if (el && el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
+    }
     
     // 清除分析图标
-    Object.values(this.analyzeIcons).forEach(el => {
-      if (el && el.parentNode) el.parentNode.removeChild(el);
-    });
+    for (const nodeId in this.analyzeIcons) {
+      const el = this.analyzeIcons[nodeId];
+      if (el && el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
+    }
     
     // 清除阶段指示器
-    Object.values(this.phaseIndicators).forEach(el => {
-      if (el && el.parentNode) el.parentNode.removeChild(el);
-    });
+    for (const nodeId in this.phaseIndicators) {
+      const el = this.phaseIndicators[nodeId];
+      if (el && el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
+    }
     
     // 重置存储
     this.progressBars = {};
     this.analyzeIcons = {};
     this.phaseIndicators = {};
+    
+    console.log("已清理所有进度显示元素");
+  }
+  
+  /**
+   * 获取与指定节点相关的所有连线 (在 ECharts 缓存中)
+   * @private
+   */
+  _getLinksForNode(nodeId) {
+    const option = this.chart.getOption();
+    if (!option || !option.series || !option.series[0] || !option.series[0].links) return [];
+    return option.series[0].links.filter(link =>
+        (link.source === nodeId || link.target === nodeId)
+    );
+  }
+  
+  /**
+   * 更新连线样式
+   * @private
+   */
+  _updateLinkStyle(link, color, width) {
+    // 取出当前图表配置
+    const option = this.chart.getOption();
+    const seriesLinks = option.series[0].links;
+    
+    // 找到该连线在 links 数组的索引
+    const linkIndex = seriesLinks.findIndex(l => l.source === link.source && l.target === link.target);
+    if (linkIndex === -1) return;
+    
+    seriesLinks[linkIndex].lineStyle = {
+        ...(seriesLinks[linkIndex].lineStyle || {}),
+        color: color,
+        width: width,
+        opacity: 0.8
+    };
+
+    // 重新设置到图表中
+    this.chart.setOption({
+        series: [{
+            links: seriesLinks
+        }]
+    });
+  }
+  
+  /**
+   * 更新所有连线
+   * 遍历图表中的所有连线，根据连接节点的状态更新样式
+   */
+  updateAllLinks() {
+    if (!this.chart) return this;
+    
+    try {
+      console.log("开始全局连线更新...");
+      
+      const option = this.chart.getOption();
+      if (!option || !option.series || !option.series[0]) return this;
+      
+      const nodes = option.series[0].data || [];
+      const links = option.series[0].links || [];
+      
+      if (links.length === 0) {
+        console.log("没有找到连线，更新终止");
+        return this;
+      }
+      
+      console.log(`找到 ${links.length} 条连线需要更新`);
+      let coloredCount = 0;
+      
+      // 遍历所有连线
+      links.forEach(link => {
+        const sourceNode = nodes.find(n => n && n.id === link.source);
+        const targetNode = nodes.find(n => n && n.id === link.target);
+        
+        if (!sourceNode || !targetNode) return;
+        
+        // 检查两端节点状态
+        const bothCompleted = sourceNode.status === 'completed' && targetNode.status === 'completed';
+        
+        if (bothCompleted) {
+          // 两端节点都完成，使用原始彩色
+          const originalColor = link.originalColor || '#f39c12';
+          if (link.lineStyle) {
+            link.lineStyle.color = originalColor;
+            link.lineStyle.width = 2;
+            link.lineStyle.opacity = 0.9;
+          }
+          coloredCount++;
+        } else {
+          // 至少一端节点未完成，使用灰色
+          if (link.lineStyle) {
+            link.lineStyle.color = '#aaaaaa';
+            link.lineStyle.width = 1;
+            link.lineStyle.opacity = 0.6;
+          }
+        }
+      });
+      
+      // 更新图表
+      this.chart.setOption({
+        series: [{
+          links: links
+        }]
+      }, false);
+      
+      console.log(`连线更新完成: ${coloredCount}/${links.length} 条连线设置为彩色`);
+    } catch (error) {
+      console.error("更新所有连线时出错:", error);
+    }
+    
+    return this;
   }
 }

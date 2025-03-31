@@ -1,3 +1,5 @@
+import { EventEmitter } from '../utils/event-bus.js';
+
 /**
  * 可视化抽象接口 - 定义所有可视化适配器必须实现的方法
  */
@@ -7,12 +9,36 @@ export class Visualizer {
         throw new Error("抽象类不能实例化");
       }
       
+      if (!container) {
+        throw new Error('必须提供图表容器');
+      }
+      
       this.container = container;
       this.miniMapContainer = miniMapContainer;
-      this.eventBus = eventBus;
+      this.eventBus = eventBus || new EventEmitter();
       this.progressBars = {};
       this.analyzeIcons = {};
       this.phaseIndicators = {};
+      
+      // 缩放级别
+      this.minZoom = 0.1;
+      this.maxZoom = 5;
+      this.currentZoom = 1;
+      
+      // 事件注册
+      this._setupEvents();
+    }
+    
+    /**
+     * 设置事件
+     * @private
+     */
+    _setupEvents() {
+      // 添加对布局优化完成事件的处理
+      this.eventBus.on('layout-optimized', () => {
+        console.log('布局优化完成，触发视图更新');
+        this.updateElementPositions();
+      });
     }
     
     /**

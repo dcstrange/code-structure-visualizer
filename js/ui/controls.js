@@ -12,6 +12,7 @@ export class Controls {
       this.threadCount = document.getElementById('threadCount');
       this.analysisMode = document.getElementById('analysisMode');
       this.visualizerType = document.getElementById('visualizerType');
+      this.nodeCount = document.getElementById('nodeCount');
       this.revealInfo = document.getElementById('reveal-info');
       this.zoomInButton = document.getElementById('zoom-in');
       this.zoomOutButton = document.getElementById('zoom-out');
@@ -51,18 +52,37 @@ export class Controls {
      * @param {number} progress 进度百分比
      */
     showProgress(progress) {
+      // 确保进度值为整数
+      progress = Math.round(progress);
+      
+      // 记录进度变化
+      console.log(`显示进度更新: ${progress}%`);
+      
+      // 显示进度信息
       this.revealInfo.style.display = 'block';
       this.revealInfo.textContent = `代码结构解析进度: ${progress}%`;
       
+      // 添加视觉反馈 - 设置背景颜色根据进度变化
+      const intensity = Math.min(100, progress) / 100;
+      const hue = 120 * intensity; // 从红色(0)到绿色(120)
+      this.revealInfo.style.backgroundColor = `hsla(${hue}, 70%, 60%, 0.2)`;
+      this.revealInfo.style.transition = 'background-color 0.5s';
+      
+      // 完成时特殊处理
       if (progress >= 100) {
-        this.revealInfo.textContent = '代码结构解析完成';
-        // 3秒后隐藏提示
+        this.revealInfo.textContent = '代码结构解析完成!';
+        this.revealInfo.style.backgroundColor = 'rgba(76, 175, 80, 0.3)'; // 更明显的绿色
+        this.revealInfo.style.fontWeight = 'bold';
+        
+        // 3秒后淡出
         setTimeout(() => {
           this.revealInfo.style.opacity = '0';
           this.revealInfo.style.transition = 'opacity 1s';
           setTimeout(() => {
             this.revealInfo.style.display = 'none';
             this.revealInfo.style.opacity = '1';
+            this.revealInfo.style.fontWeight = 'normal';
+            this.revealInfo.style.backgroundColor = '';
           }, 1000);
         }, 3000);
       }
@@ -119,6 +139,13 @@ export class Controls {
      */
     getVisualizerType() {
       return this.visualizerType.value;
+    }
+    
+    /**
+     * 获取节点数量
+     */
+    getNodeCount() {
+      return parseInt(this.nodeCount.value, 10);
     }
     
     // 私有方法
@@ -181,6 +208,11 @@ export class Controls {
       // 可视化类型变更
       this.visualizerType.addEventListener('change', () => {
         this.eventBus.emit('visualizer-type-changed', this.getVisualizerType());
+      });
+      
+      // 节点数量变更
+      this.nodeCount.addEventListener('change', () => {
+        this.eventBus.emit('node-count-changed', this.getNodeCount());
       });
       
       // 监听来自其他组件的事件

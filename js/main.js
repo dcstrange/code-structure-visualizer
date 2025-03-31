@@ -21,6 +21,7 @@ class App {
     
     // 应用状态
     this.currentVisualizerType = 'echarts';
+    this.nodeCount = 500; // 默认节点数量
     
     // 组件初始化
     this.dataModel = new DataModel(this.eventBus);
@@ -43,42 +44,199 @@ class App {
     try {
       console.log("开始初始化应用");
       
+      // 添加加载提示
+      this._showLoadingIndicator(`正在准备${this.nodeCount}个节点的结构图...`);
+      
       // 加载节点类型配置
       this.eventBus.emit('node-types-loaded', getNodeTypeConfig());
       console.log("节点类型配置已加载");
       
-      // 延迟创建可视化实例，确保DOM和依赖已加载
+      // 使用延迟加载和批处理优化初始化流程
       setTimeout(() => {
         try {
-          this._createVisualizer(this.currentVisualizerType);
-          console.log("可视化实例已创建");
+          // 第一步：生成数据
+          console.time('数据生成');
+          this.dataModel.generateData(this.nodeCount);
+          console.timeEnd('数据生成');
+          console.log(`生成了 ${this.dataModel.nodes.length} 个节点`);
           
-          // 初始化UI组件
-          this.controls.initialize();
-          this.filters.initialize();
-          this.statistics.initialize();
-          console.log("UI组件已初始化");
+          // 更新加载提示
+          this._showLoadingIndicator("正在初始化可视化引擎...");
           
-          // 生成数据
-          this.dataModel.generateData();
-          console.log("数据已生成:", this.dataModel.nodes.length, "个节点");
-          
-          // 如果可视化已就绪，更新数据
-          if (this.visualizer && this.visualizer.chart) {
-            this.visualizer.updateNodes(this.dataModel.nodes);
-            this.visualizer.updateLinks(this.dataModel.links);
-          }
+          // 第二步：延迟创建可视化实例
+          setTimeout(() => {
+            try {
+              console.time('可视化初始化');
+              this._createVisualizer(this.currentVisualizerType);
+              console.timeEnd('可视化初始化');
+              
+              // 确保数据传递给可视化组件
+              if (this.visualizer) {
+                console.log("正在更新可视化组件数据...");
+                this.visualizer.updateNodes(this.dataModel.nodes);
+                this.visualizer.updateLinks(this.dataModel.links);
+                
+                // 在数据更新后重新初始化进度条
+                console.log("重新初始化进度显示元素...");
+                setTimeout(() => {
+                  if (this.visualizer && typeof this.visualizer.initProgressElements === 'function') {
+                    this.visualizer.initProgressElements();
+                  }
+                }, 100);
+              }
+              
+              // 第三步：延迟初始化UI组件
+              setTimeout(() => {
+                try {
+                  console.time('UI初始化');
+                  // 初始化UI组件
+                  this.controls.initialize();
+                  this.filters.initialize();
+                  this.statistics.initialize();
+                  console.timeEnd('UI初始化');
+                  
+                  // 隐藏加载提示
+                  this._hideLoadingIndicator();
+                  
+                  // 显示性能提示
+                  this._showPerformanceInfo();
+                } catch (e) {
+                  console.error("UI组件初始化期间出错:", e);
+                  this._hideLoadingIndicator();
+                }
+              }, 100);
+            } catch (e) {
+              console.error("可视化初始化期间出错:", e);
+              this._hideLoadingIndicator();
+            }
+          }, 50);
         } catch (e) {
-          console.error("应用初始化期间出错:", e);
+          console.error("数据生成期间出错:", e);
+          this._hideLoadingIndicator();
         }
-      }, 100); // 短暂延迟确保DOM已完全加载
+      }, 0);
       
       console.log("初始化流程已启动");
     } catch (error) {
       console.error("应用初始化失败:", error);
+      this._hideLoadingIndicator();
     }
     
     return this;
+  }
+  
+  /**
+   * 显示加载指示器
+   * @private
+   */
+  _showLoadingIndicator(message) {
+    // 检查是否已存在加载指示器
+    let loadingEl = document.getElementById('loading-indicator');
+    
+    if (!loadingEl) {
+      loadingEl = document.createElement('div');
+      loadingEl.id = 'loading-indicator';
+      loadingEl.innerHTML = `
+        <div class="loading-spinner"></div>
+        <div class="loading-message">${message || '加载中...'}</div>
+      `;
+      loadingEl.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.7);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        color: white;
+        font-size: 18px;
+      `;
+      
+      // 添加旋转动画
+      const style = document.createElement('style');
+      style.textContent = `
+        .loading-spinner {
+          width: 50px;
+          height: 50px;
+          border: 5px solid rgba(255,255,255,0.3);
+          border-radius: 50%;
+          border-top-color: white;
+          animation: spin 1s ease-in-out infinite;
+          margin-bottom: 20px;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `;
+      document.head.appendChild(style);
+      
+      document.body.appendChild(loadingEl);
+    } else {
+      // 更新消息
+      const messageEl = loadingEl.querySelector('.loading-message');
+      if (messageEl && message) {
+        messageEl.textContent = message;
+      }
+    }
+  }
+  
+  /**
+   * 隐藏加载指示器
+   * @private
+   */
+  _hideLoadingIndicator() {
+    const loadingEl = document.getElementById('loading-indicator');
+    if (loadingEl) {
+      loadingEl.style.opacity = '0';
+      loadingEl.style.transition = 'opacity 0.5s';
+      setTimeout(() => {
+        if (loadingEl.parentNode) {
+          loadingEl.parentNode.removeChild(loadingEl);
+        }
+      }, 500);
+    }
+  }
+  
+  /**
+   * 显示性能信息
+   * @private
+   */
+  _showPerformanceInfo() {
+    const infoEl = document.createElement('div');
+    infoEl.className = 'performance-info';
+    infoEl.innerHTML = `
+      <div>节点总数: ${this.dataModel.nodes.length}</div>
+      <div>连接总数: ${this.dataModel.links.length}</div>
+      <div>可视化引擎: ${this.currentVisualizerType}</div>
+    `;
+    infoEl.style.cssText = `
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      z-index: 900;
+    `;
+    
+    document.body.appendChild(infoEl);
+    
+    // 3秒后隐藏
+    setTimeout(() => {
+      infoEl.style.opacity = '0';
+      infoEl.style.transition = 'opacity 0.5s';
+      setTimeout(() => {
+        if (infoEl.parentNode) {
+          infoEl.parentNode.removeChild(infoEl);
+        }
+      }, 500);
+    }, 3000);
   }
 
   /**
@@ -137,19 +295,77 @@ class App {
    * @private
    */
   _setupEventListeners() {
-    // 监听开始分析请求
+    // 分析事件
     this.eventBus.on('start-analysis-requested', (threadCount, mode) => {
-      this.analysisEngine.startAnalysis(threadCount);
+      // 设置分析模式
+      this.analysisEngine.analysisMode = mode;
+      
+      // 如果可视化实例存在，则开始分析
+      if (this.visualizer) {
+        console.log(`开始分析, 模式=${mode}, 线程数=${threadCount}`);
+        this.analysisEngine.startAnalysis(threadCount);
+      }
     });
     
-    // 监听停止分析请求
     this.eventBus.on('stop-analysis-requested', () => {
       this.analysisEngine.stopAnalysis();
     });
     
-    // 监听继续分析请求
     this.eventBus.on('continue-analysis-requested', (threadCount) => {
       this.analysisEngine.continueAnalysis(threadCount);
+    });
+    
+    // 过滤事件
+    this.eventBus.on('filter-changed', (types) => {
+      if (this.dataModel && this.visualizer) {
+        this.dataModel.updateNodeVisibility(types);
+        this.visualizer.applyFilter(this.dataModel.nodes, this.dataModel.links);
+      }
+    });
+    
+    // 可视化相关事件
+    this.eventBus.on('visualizer-type-changed', (type) => {
+      if (type !== this.currentVisualizerType) {
+        this._createVisualizer(type);
+      }
+    });
+    
+    // 节点数量变更事件
+    this.eventBus.on('node-count-changed', (count) => {
+      if (count !== this.nodeCount) {
+        this.nodeCount = count;
+        console.log(`节点数量已变更为 ${count}`);
+        
+        // 显示加载提示
+        this._showLoadingIndicator(`正在重新生成${count}个节点的结构图...`);
+        
+        // 使用setTimeout避免UI冻结
+        setTimeout(() => {
+          // 停止当前分析（如果有）
+          if (this.analysisEngine.isAnalysisRunning()) {
+            this.analysisEngine.stopAnalysis();
+          }
+          
+          // 重新生成数据
+          this.dataModel.generateData(count);
+          
+          // 更新可视化
+          if (this.visualizer) {
+            this.visualizer.updateNodes(this.dataModel.nodes);
+            this.visualizer.updateLinks(this.dataModel.links);
+            
+            // 重新初始化进度条
+            setTimeout(() => {
+              if (typeof this.visualizer.initProgressElements === 'function') {
+                this.visualizer.initProgressElements();
+              }
+              this._hideLoadingIndicator();
+            }, 100);
+          } else {
+            this._hideLoadingIndicator();
+          }
+        }, 50);
+      }
     });
     
     // 监听重置视图请求
@@ -215,18 +431,6 @@ class App {
     this.eventBus.on('nodes-reset', () => {
       if (this.visualizer) {
         this.visualizer.initProgressElements();
-      }
-    });
-    
-    // 监听过滤变更
-    this.eventBus.on('filter-changed', (typesToShow) => {
-      this.dataModel.updateNodeVisibility(typesToShow);
-    });
-    
-    // 监听可视化类型变更
-    this.eventBus.on('visualizer-type-changed', (type) => {
-      if (type !== this.currentVisualizerType) {
-        this._createVisualizer(type);
       }
     });
     

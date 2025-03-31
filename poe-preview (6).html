@@ -1,0 +1,1969 @@
+<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://code.jquery.com https://unpkg.com https://d3js.org https://threejs.org https://cdn.plot.ly https://stackpath.bootstrapcdn.com https://maps.googleapis.com https://cdn.tailwindcss.com https://ajax.googleapis.com https://kit.fontawesome.com https://cdn.datatables.net https://maxcdn.bootstrapcdn.com https://code.highcharts.com https://tako-static-assets-production.s3.amazonaws.com https://www.youtube.com https://fonts.googleapis.com https://fonts.gstatic.com https://pfst.cf2.poecdn.net https://puc.poecdn.net https://i.imgur.com https://wikimedia.org https://*.icons8.com https://*.giphy.com https://picsum.photos https://images.unsplash.com; frame-src 'self' https://www.youtube.com https://trytako.com; child-src 'self'; manifest-src 'self'; worker-src 'self'; upgrade-insecure-requests; block-all-mixed-content;">
+  <title>代码结构可视化</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&amp;display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary-bg: #1e1e2e;
+      --secondary-bg: #252535;
+      --card-bg: rgba(40, 42, 54, 0.95);
+      --primary-text: #d1d5db;
+      --secondary-text: #9ca3af;
+      --accent-1: #6272a4;
+      --accent-2: #bd93f9;
+      --accent-3: #50fa7b;
+      --shade-1: rgba(98, 114, 164, 0.15);
+      --shade-2: rgba(189, 147, 249, 0.15);
+      --shade-3: rgba(80, 250, 123, 0.15);
+      --shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+      --border-radius: 4px;
+      --transition: all 0.2s ease;
+      --disabled-opacity: 0.5;
+      --grid-color: rgba(98, 114, 164, 0.1);
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      margin: 0;
+      padding: 15px;
+      background-color: var(--primary-bg);
+      color: var(--primary-text);
+      transition: var(--transition);
+      background-image: 
+        linear-gradient(to right, var(--grid-color) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px);
+      background-size: 20px 20px;
+    }
+    
+    .app-container {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 30px);
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 15px;
+      position: relative;
+    }
+    
+    .header h1 {
+      font-size: 24px;
+      font-weight: 500;
+      margin: 0 0 5px 0;
+      color: var(--accent-2);
+      letter-spacing: -0.5px;
+    }
+    
+    .header p {
+      font-size: 14px;
+      color: var(--secondary-text);
+      margin: 0;
+    }
+    
+    .controls {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 15px;
+      padding: 12px;
+      background-color: var(--card-bg);
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(98, 114, 164, 0.2);
+    }
+    
+    .control-group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    
+    .controls button {
+      padding: 6px 12px;
+      border: none;
+      border-radius: var(--border-radius);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition);
+      font-family: 'JetBrains Mono', monospace;
+      background-color: var(--accent-1);
+      color: #ffffff;
+    }
+    
+    .controls button:not(:disabled):hover {
+      background-color: var(--accent-2);
+    }
+    
+    .controls button:disabled {
+      opacity: var(--disabled-opacity);
+      cursor: not-allowed;
+    }
+    
+    .thread-selection, .analysis-options {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      border-radius: var(--border-radius);
+      background-color: rgba(98, 114, 164, 0.2);
+    }
+    
+    .thread-selection select, .analysis-options select {
+      padding: 4px 8px;
+      border-radius: var(--border-radius);
+      border: 1px solid rgba(98, 114, 164, 0.3);
+      font-size: 13px;
+      background-color: var(--primary-bg);
+      color: var(--primary-text);
+      font-family: 'JetBrains Mono', monospace;
+      cursor: pointer;
+    }
+    
+    .thread-selection span, .analysis-options span {
+      color: var(--secondary-text);
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    
+    #status {
+      padding: 6px 12px;
+      background-color: rgba(98, 114, 164, 0.2);
+      border-radius: var(--border-radius);
+      font-size: 13px;
+      color: var(--primary-text);
+      border: 1px solid rgba(98, 114, 164, 0.3);
+    }
+    
+    .main-content {
+      display: flex;
+      flex: 1;
+      gap: 15px;
+      min-height: 0; /* 重要：让flex子元素能够在有限空间内滚动 */
+    }
+    
+    .filter-panel {
+      width: 180px;
+      background-color: var(--card-bg);
+      border-radius: var(--border-radius);
+      padding: 15px;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(98, 114, 164, 0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    
+    .filter-panel h2 {
+      font-size: 16px;
+      color: var(--accent-2);
+      margin-bottom: 10px;
+    }
+    
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .filter-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+    
+    .filter-item input {
+      margin: 0;
+    }
+    
+    .filter-color {
+      width: 14px;
+      height: 14px;
+      border-radius: 2px;
+    }
+    
+    .graph-container {
+      flex: 1;
+      position: relative;
+      border-radius: var(--border-radius);
+      overflow: hidden;
+      background-color: var(--card-bg);
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(98, 114, 164, 0.2);
+    }
+    
+    /* 分析中禁用交互样式 */
+    .analyzing-active .graph-container::after {
+      content: "分析进行中，交互已禁用";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px 20px;
+      border-radius: var(--border-radius);
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 1000;
+      pointer-events: none;
+      opacity: 0;
+      animation: fade-in-out 4s forwards;
+    }
+    
+    @keyframes fade-in-out {
+      0% { opacity: 0; }
+      20% { opacity: 1; }
+      80% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+    
+    #container {
+      width: 100%;
+      height: 100%;
+      transition: var(--transition);
+    }
+    
+    .zoom-controls {
+      position: absolute;
+      bottom: 15px;
+      right: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 10;
+    }
+    
+    .zoom-controls button {
+      width: 30px;
+      height: 30px;
+      border-radius: 4px;
+      background: var(--accent-1);
+      border: none;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition);
+    }
+    
+    .zoom-controls button:not(:disabled):hover {
+      background: var(--accent-2);
+    }
+    
+    .zoom-controls button:disabled {
+      opacity: var(--disabled-opacity);
+      cursor: not-allowed;
+    }
+    
+    .mini-map {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      width: 120px;
+      height: 120px;
+      background: rgba(40, 42, 54, 0.8);
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      z-index: 10;
+      border: 1px solid rgba(98, 114, 164, 0.3);
+    }
+    
+    .mini-map-container {
+      width: 100%;
+      height: 100%;
+    }
+    
+    .stats-panel {
+      background-color: var(--card-bg);
+      border-radius: var(--border-radius);
+      padding: 15px;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(98, 114, 164, 0.2);
+      margin-top: 15px;
+    }
+    
+    .stats-panel h3 {
+      font-size: 16px;
+      color: var(--accent-2);
+      margin-bottom: 15px;
+    }
+    
+    .stats-grid {
+      display: flex;
+      justify-content: space-between;
+      gap: 15px;
+    }
+    
+    .stat-box {
+      flex: 1;
+      background-color: rgba(98, 114, 164, 0.1);
+      border-radius: var(--border-radius);
+      padding: 10px;
+      border: 1px solid rgba(98, 114, 164, 0.2);
+    }
+    
+    .stat-value {
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--accent-2);
+      margin-bottom: 2px;
+    }
+    
+    .stat-label {
+      font-size: 12px;
+      color: var(--secondary-text);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    /* 进度条样式 */
+    .progress-bar-container {
+      position: absolute;
+      height: 3px;
+      background-color: rgba(98, 114, 164, 0.2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background-color: var(--accent-2);
+      position: relative;
+      transition: width 0.2s ease;
+    }
+    
+    /* 齿轮旋转动画 */
+    @keyframes rotate {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    
+    .analyzing-icon {
+      animation: pulse 2s infinite, rotate 2s linear infinite;
+    }
+    
+    @keyframes pulse {
+      0% { opacity: 0.7; }
+      50% { opacity: 1; }
+      100% { opacity: 0.7; }
+    }
+    
+    #reveal-info {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      background-color: rgba(40, 42, 54, 0.9);
+      padding: 8px 12px;
+      border-radius: var(--border-radius);
+      font-size: 13px;
+      color: var(--primary-text);
+      pointer-events: none;
+      z-index: 10;
+      border: 1px solid rgba(98, 114, 164, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <div class="header">
+      <h1>代码结构解析器</h1>
+      <p>分析代码元素间的关系与依赖</p>
+    </div>
+    
+    <div class="controls">
+      <div class="control-group">
+        <button id="startAnalysis">开始分析</button>
+        <button id="stopAnalysis">停止分析</button>
+        <button id="continueAnalysis" disabled="">深入分析</button>
+        <button id="resetView">重置视图</button>
+      </div>
+      
+      <div class="control-group">
+        <div class="thread-selection">
+          <span>线程数</span>
+          <select id="threadCount">
+            <option value="1">1</option>
+            <option value="3" selected="">3</option>
+            <option value="5">5</option>
+          </select>
+        </div>
+        
+        <div class="analysis-options">
+          <span>策略</span>
+          <select id="analysisMode">
+            <option value="progressive">递进式</option>
+            <option value="complete">完整分析</option>
+          </select>
+        </div>
+      </div>
+      
+      <div id="status">系统就绪，等待分析指令</div>
+    </div>
+    
+    <div class="main-content">
+      <div class="filter-panel">
+        <h2>节点过滤</h2>
+        <div class="filter-group">
+          <div class="filter-item">
+            <input type="checkbox" id="filter-all" checked="">
+            <label for="filter-all">全部显示</label>
+          </div>
+          <div class="filter-item">
+            <input type="checkbox" id="filter-function">
+            <span class="filter-color" style="background-color: #5470c6;"></span>
+            <label for="filter-function">函数</label>
+          </div>
+          <div class="filter-item">
+            <input type="checkbox" id="filter-variable">
+            <span class="filter-color" style="background-color: #91cc75;"></span>
+            <label for="filter-variable">变量</label>
+          </div>
+          <div class="filter-item">
+            <input type="checkbox" id="filter-class">
+            <span class="filter-color" style="background-color: #fac858;"></span>
+            <label for="filter-class">类</label>
+          </div>
+          <div class="filter-item">
+            <input type="checkbox" id="filter-typedef">
+            <span class="filter-color" style="background-color: #ee6666;"></span>
+            <label for="filter-typedef">类型定义</label>
+          </div>
+          <div class="filter-item">
+            <input type="checkbox" id="filter-macro">
+            <span class="filter-color" style="background-color: #73c0de;"></span>
+            <label for="filter-macro">宏/常量</label>
+          </div>
+          <div class="filter-item">
+            <input type="checkbox" id="filter-api">
+            <span class="filter-color" style="background-color: #fc8452;"></span>
+            <label for="filter-api">API</label>
+          </div>
+        </div>
+      </div>
+      
+      <div class="graph-container">
+        <div id="container"></div>
+        <div id="reveal-info" style="display: none;">代码结构解析进度: 0%</div>
+        <div class="mini-map">
+          <div id="mini-map-container"></div>
+        </div>
+        <div class="zoom-controls">
+          <button id="zoom-in">+</button>
+          <button id="zoom-out">-</button>
+          <button id="zoom-fit">⟲</button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="stats-panel">
+      <h3>解析统计</h3>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-value" id="pending-count">0</div>
+          <div class="stat-label">待分析</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="analyzing-count">0</div>
+          <div class="stat-label">分析中</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="partial-count">0</div>
+          <div class="stat-label">部分完成</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="completed-count">0</div>
+          <div class="stat-label">分析完成</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="total-progress">0%</div>
+          <div class="stat-label">总体进度</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const statusEl = document.getElementById('status');
+      const container = document.getElementById('container');
+      const miniMapContainer = document.getElementById('mini-map-container');
+      const continueButton = document.getElementById('continueAnalysis');
+      const revealInfo = document.getElementById('reveal-info');
+      const resetViewButton = document.getElementById('resetView');
+      const zoomInButton = document.getElementById('zoom-in');
+      const zoomOutButton = document.getElementById('zoom-out');
+      const zoomFitButton = document.getElementById('zoom-fit');
+      const startAnalysisButton = document.getElementById('startAnalysis');
+      const stopAnalysisButton = document.getElementById('stopAnalysis');
+      let myChart = null;
+      let miniMap = null;
+      
+      // 过滤选项
+      const filterAll = document.getElementById('filter-all');
+      const filterFunction = document.getElementById('filter-function');
+      const filterVariable = document.getElementById('filter-variable');
+      const filterClass = document.getElementById('filter-class');
+      const filterTypedef = document.getElementById('filter-typedef');
+      const filterMacro = document.getElementById('filter-macro');
+      const filterApi = document.getElementById('filter-api');
+      const filterCheckboxes = [filterFunction, filterVariable, filterClass, filterTypedef, filterMacro, filterApi];
+      
+      // 处理过滤器
+      filterAll.addEventListener('change', function() {
+        const isChecked = this.checked;
+        filterCheckboxes.forEach(checkbox => {
+          checkbox.checked = false;
+          checkbox.disabled = isChecked;
+        });
+        updateNodeVisibility();
+      });
+      
+      filterCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+          // 如果任何一个特定类型被选中，取消"全部"选项
+          if (this.checked) {
+            filterAll.checked = false;
+          }
+          
+          // 如果所有特定类型都没有被选中，选中"全部"选项
+          if (!filterCheckboxes.some(cb => cb.checked)) {
+            filterAll.checked = true;
+            filterCheckboxes.forEach(cb => cb.disabled = true);
+          }
+          
+          updateNodeVisibility();
+        });
+      });
+      
+      // 全局图表配置
+      const maxZoom = 5;
+      const minZoom = 0.5;
+      const defaultZoom = 1;
+      let currentZoom = defaultZoom;
+      
+      // 左右布局的画布布局常量
+      const CANVAS_WIDTH = 800;
+      const CANVAS_HEIGHT = 600;
+      
+      try {
+        // 检查ECharts是否加载
+        if (typeof echarts === 'undefined') {
+          throw new Error('ECharts库未成功加载，请检查网络连接');
+        }
+        
+        statusEl.textContent = "正在初始化分析环境...";
+        
+        // 禁用滚轮事件
+        container.addEventListener('wheel', function(event) {
+          event.preventDefault();
+        }, { passive: false });
+        
+        // 控制交互状态（禁用/启用）的函数
+        function setInteractionEnabled(enabled) {
+          // 禁用/启用缩放和重置按钮
+          zoomInButton.disabled = !enabled;
+          zoomOutButton.disabled = !enabled;
+          zoomFitButton.disabled = !enabled;
+          resetViewButton.disabled = !enabled;
+          
+          // 禁用/启用过滤器
+          filterAll.disabled = !enabled || filterAll.checked;
+          filterCheckboxes.forEach(checkbox => {
+            checkbox.disabled = !enabled || filterAll.checked;
+          });
+          
+          // 当分析运行时禁用分析相关的交互
+          startAnalysisButton.disabled = !enabled && analysisRunning;
+          
+          // 禁用/启用图表拖拽
+          if (myChart) {
+            myChart.setOption({
+              series: [{
+                roam: enabled ? 'move' : false
+              }]
+            });
+          }
+          
+          // 添加或删除分析中的类名，用于CSS样式和视觉反馈
+          if (!enabled) {
+            document.body.classList.add('analyzing-active');
+          } else {
+            document.body.classList.remove('analyzing-active');
+          }
+        }
+        
+        // 重置视图功能
+        resetViewButton.addEventListener('click', function() {
+          if (myChart) {
+            myChart.dispatchAction({
+              type: 'restore'
+            });
+            currentZoom = defaultZoom;
+            myChart.setOption({
+              series: [{
+                zoom: currentZoom
+              }]
+            });
+            updateMiniMap();
+          }
+        });
+        
+        // 缩放控制
+        zoomInButton.addEventListener('click', function() {
+          if (myChart) {
+            currentZoom = Math.min(currentZoom * 1.2, maxZoom);
+            myChart.setOption({
+              series: [{
+                zoom: currentZoom
+              }]
+            });
+            updateMiniMap();
+          }
+        });
+        
+        zoomOutButton.addEventListener('click', function() {
+          if (myChart) {
+            currentZoom = Math.max(currentZoom / 1.2, minZoom);
+            myChart.setOption({
+              series: [{
+                zoom: currentZoom
+              }]
+            });
+            updateMiniMap();
+          }
+        });
+        
+        zoomFitButton.addEventListener('click', function() {
+          if (myChart) {
+            currentZoom = defaultZoom;
+            myChart.setOption({
+              series: [{
+                zoom: currentZoom
+              }]
+            });
+            myChart.dispatchAction({
+              type: 'restore'
+            });
+            updateMiniMap();
+          }
+        });
+        
+        // 节点类型配置 - 左右布局
+        const nodeTypeConfig = {
+          'function': {
+            symbol: 'circle',
+            color: '#5470c6',
+            borderColor: 'rgba(84, 112, 198, 0.7)',
+            name: '函数',
+            complexity: 'high',
+            region: { x: 100, y: 150, w: 200, h: 300 }, // 放置在左侧
+            layout: 'grid',
+            count: 15
+          },
+          'variable': {
+            symbol: 'rect',
+            color: '#91cc75',
+            borderColor: 'rgba(145, 204, 117, 0.7)',
+            name: '变量',
+            complexity: 'low',
+            region: { x: 350, y: 100, w: 200, h: 200 }, // 放置在中部偏上
+            layout: 'grid',
+            count: 10
+          },
+          'class': {
+            symbol: 'diamond',
+            color: '#fac858',
+            borderColor: 'rgba(250, 200, 88, 0.7)',
+            name: '类',
+            complexity: 'high',
+            region: { x: 350, y: 350, w: 200, h: 200 }, // 放置在中部偏下
+            layout: 'grid',
+            count: 7
+          },
+          'typedef': {
+            symbol: 'pin',
+            color: '#ee6666',
+            borderColor: 'rgba(238, 102, 102, 0.7)',
+            name: '类型定义',
+            complexity: 'medium',
+            region: { x: 600, y: 100, w: 200, h: 200 }, // 放置在右侧偏上
+            layout: 'grid',
+            count: 7
+          },
+          'macro': {
+            symbol: 'roundRect',
+            color: '#73c0de',
+            borderColor: 'rgba(115, 192, 222, 0.7)',
+            name: '宏/常量',
+            complexity: 'low',
+            region: { x: 600, y: 350, w: 200, h: 100 }, // 放置在右侧偏下
+            layout: 'grid',
+            count: 6
+          },
+          'api': {
+            symbol: 'triangle',
+            color: '#fc8452',
+            borderColor: 'rgba(252, 132, 82, 0.7)',
+            name: 'API',
+            complexity: 'medium',
+            region: { x: 600, y: 500, w: 200, h: 100 }, // 放置在右下角
+            layout: 'grid',
+            count: 6
+          }
+        };
+        
+        // 分析阶段配置
+        const complexityConfig = {
+          'high': {
+            phases: 3,
+            phaseNames: ['基础结构', '逻辑分析', '深度检查'],
+            colors: ['#faad14', '#fa8c16', '#52c41a']
+          },
+          'medium': {
+            phases: 2,
+            phaseNames: ['基础分析', '深度检查'],
+            colors: ['#faad14', '#52c41a']
+          },
+          'low': {
+            phases: 1,
+            phaseNames: ['完整分析'],
+            colors: ['#52c41a']
+          }
+        };
+        
+        // 准备模拟数据
+        const codeElements = {
+          'function': [
+            'getData()', 'processResult()', 'validateInput()', 'calculateSum()', 
+            'findUserById()', 'updateConfig()', 'handleRequest()', 'parseJSON()', 
+            'renderUI()', 'sendNotification()', 'checkPermissions()', 'encryptData()', 
+            'connectDatabase()', 'logActivity()', 'fetchResources()'
+          ],
+          'variable': [
+            'userCount', 'dataCache', 'resultSet', 'configOptions', 
+            'errorMessage', 'isActive', 'currentUser', 'pageIndex', 
+            'totalItems', 'selectedOption'
+          ],
+          'class': [
+            'UserManager', 'DataProcessor', 'EventHandler', 'ConfigService', 
+            'ApiClient', 'CacheStore', 'Logger'
+          ],
+          'typedef': [
+            'UserProfile', 'RequestParams', 'ResponseData', 'ErrorCode',
+            'ConfigOption', 'ValidationRule', 'DatabaseRecord'
+          ],
+          'macro': [
+            'MAX_RETRY_COUNT', 'DEFAULT_TIMEOUT', 'LOG_LEVEL', 'API_VERSION',
+            'ENABLE_CACHING', 'DEBUG_MODE'
+          ],
+          'api': [
+            'GET /users', 'POST /auth', 'PUT /profile', 'DELETE /session',
+            'GET /products', 'POST /orders'
+          ]
+        };
+        
+        // 布局算法
+        function generateNodeCoordinates(type, index, totalNodes) {
+          const config = nodeTypeConfig[type];
+          const region = config.region;
+          const centerX = region.x + region.w / 2;
+          const centerY = region.y + region.h / 2;
+          
+          // 主要使用网格布局 - 更精确的布局
+          const cols = Math.ceil(Math.sqrt(totalNodes));
+          const rows = Math.ceil(totalNodes / cols);
+          const cellWidth = region.w / (cols + 1);
+          const cellHeight = region.h / (rows + 1);
+          const row = Math.floor(index / cols);
+          const col = index % cols;
+              
+          return {
+            x: region.x + cellWidth * (col + 1),
+            y: region.y + cellHeight * (row + 1)
+          };
+        }
+        
+        function generateNodes() {
+          const nodes = [];
+          let index = 0;
+          
+          // 创建各类型节点
+          Object.entries(codeElements).forEach(([type, elements]) => {
+            const elementCount = elements.length;
+            
+            elements.forEach((name, i) => {
+              // 使用布局算法获取坐标
+              const position = generateNodeCoordinates(type, i, elementCount);
+              
+              // 确定节点复杂度
+              const complexity = nodeTypeConfig[type].complexity;
+              const requiredPhases = complexityConfig[complexity].phases;
+              const nodeColor = nodeTypeConfig[type].color;
+              const nodeBorderColor = nodeTypeConfig[type].borderColor;
+              
+              nodes.push({
+                id: index.toString(),
+                name: name,
+                nodeType: type,
+                complexity: complexity,
+                requiredPhases: requiredPhases,
+                currentPhase: 0, // 从0开始，表示尚未分析
+                value: 50, // 基础大小
+                symbolSize: 30,
+                symbol: nodeTypeConfig[type].symbol,
+                itemStyle: {
+                  color: '#aaaaaa', // 初始为灰色
+                  borderColor: '#888888',
+                  borderWidth: 1,
+                  opacity: 0.8,
+                  shadowBlur: 0
+                },
+                // 存储原始颜色供稍后使用
+                originalColor: nodeColor,
+                originalBorderColor: nodeBorderColor,
+                x: position.x,
+                y: position.y,
+                fixed: true, // 固定位置
+                status: 'pending',
+                progress: 0,
+                label: {
+                  show: true,
+                  formatter: name,
+                  fontSize: 12,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  color: '#d1d5db',
+                  fontWeight: 400,
+                  distance: 5,
+                  position: 'bottom'
+                },
+                // 用于过滤
+                hidden: false
+              });
+              index++;
+            });
+          });
+          
+          return nodes;
+        }
+        
+        function generateLinks(nodes) {
+          const links = [];
+          const functionNodes = nodes.filter(n => n.nodeType === 'function');
+          const variableNodes = nodes.filter(n => n.nodeType === 'variable');
+          const classNodes = nodes.filter(n => n.nodeType === 'class');
+          const typedefNodes = nodes.filter(n => n.nodeType === 'typedef');
+          const macroNodes = nodes.filter(n => n.nodeType === 'macro');
+          const apiNodes = nodes.filter(n => n.nodeType === 'api');
+          
+          // 函数调用函数
+          functionNodes.forEach(source => {
+            const callCount = Math.floor(Math.random() * 2) + 1;
+            for (let i = 0; i < callCount; i++) {
+              const target = functionNodes[Math.floor(Math.random() * functionNodes.length)];
+              if (source.id !== target.id) {
+                links.push({
+                  source: source.id,
+                  target: target.id,
+                  sourceType: 'function',
+                  targetType: 'function',
+                  originalColor: '#5470c6',
+                  lineStyle: {
+                    color: '#aaaaaa', // 初始为灰色
+                    width: 1,
+                    opacity: 0.6,
+                    curveness: 0.2,
+                    type: 'solid'
+                  },
+                  symbol: ['none', 'arrow'],
+                  symbolSize: [0, 5]
+                });
+              }
+            }
+          });
+          
+          // 函数使用变量
+          functionNodes.forEach(source => {
+            if (Math.random() > 0.3) {
+              const target = variableNodes[Math.floor(Math.random() * variableNodes.length)];
+              links.push({
+                source: source.id,
+                target: target.id,
+                sourceType: 'function',
+                targetType: 'variable',
+                originalColor: '#91cc75',
+                lineStyle: {
+                  color: '#aaaaaa', // 初始为灰色
+                  width: 1,
+                  opacity: 0.6,
+                  curveness: 0.2,
+                  type: 'solid'
+                },
+                symbol: ['none', 'arrow'],
+                symbolSize: [0, 5]
+              });
+            }
+          });
+          
+          // 类包含函数
+          classNodes.forEach(source => {
+            const methodCount = Math.floor(Math.random() * 3) + 1;
+            for (let i = 0; i < methodCount; i++) {
+              const target = functionNodes[Math.floor(Math.random() * functionNodes.length)];
+              links.push({
+                source: source.id,
+                target: target.id,
+                sourceType: 'class',
+                targetType: 'function',
+                originalColor: '#fac858',
+                lineStyle: {
+                  color: '#aaaaaa', // 初始为灰色
+                  width: 1,
+                  opacity: 0.6,
+                  type: 'dashed',
+                  curveness: 0.3
+                },
+                symbol: ['none', 'arrow'],
+                symbolSize: [0, 5]
+              });
+            }
+          });
+          
+          // 函数使用类型
+          functionNodes.forEach((source, index) => {
+            if (index % 3 === 0) {
+              const target = typedefNodes[Math.floor(Math.random() * typedefNodes.length)];
+              links.push({
+                source: source.id,
+                target: target.id,
+                sourceType: 'function',
+                targetType: 'typedef',
+                originalColor: '#ee6666',
+                lineStyle: {
+                  color: '#aaaaaa', // 初始为灰色
+                  width: 1,
+                  opacity: 0.6,
+                  curveness: 0.2,
+                  type: 'solid'
+                },
+                symbol: ['none', 'arrow'],
+                symbolSize: [0, 5]
+              });
+            }
+          });
+          
+          // 函数使用宏
+          functionNodes.forEach((source, index) => {
+            if (index % 4 === 1) {
+              const target = macroNodes[Math.floor(Math.random() * macroNodes.length)];
+              links.push({
+                source: source.id,
+                target: target.id,
+                sourceType: 'function',
+                targetType: 'macro',
+                originalColor: '#73c0de',
+                lineStyle: {
+                  color: '#aaaaaa', // 初始为灰色
+                  width: 1,
+                  opacity: 0.6,
+                  curveness: 0.2,
+                  type: 'solid'
+                },
+                symbol: ['none', 'arrow'],
+                symbolSize: [0, 5]
+              });
+            }
+          });
+          
+          // 函数调用API
+          functionNodes.forEach((source, index) => {
+            if (index % 5 === 2) {
+              const target = apiNodes[Math.floor(Math.random() * apiNodes.length)];
+              links.push({
+                source: source.id,
+                target: target.id,
+                sourceType: 'function',
+                targetType: 'api',
+                originalColor: '#fc8452',
+                lineStyle: {
+                  color: '#aaaaaa', // 初始为灰色
+                  width: 1,
+                  opacity: 0.6,
+                  curveness: 0.2,
+                  type: 'solid'
+                },
+                symbol: ['none', 'arrow'],
+                symbolSize: [0, 5]
+              });
+            }
+          });
+          
+          return links;
+        }
+        
+        // 生成数据
+        const nodes = generateNodes();
+        const links = generateLinks(nodes);
+        
+        // 更新节点可见性（根据过滤器）
+        function updateNodeVisibility() {
+          // 确定哪些类型应该被显示
+          const shouldShowAll = filterAll.checked;
+          const typesToShow = [];
+          
+          if (!shouldShowAll) {
+            if (filterFunction.checked) typesToShow.push('function');
+            if (filterVariable.checked) typesToShow.push('variable');
+            if (filterClass.checked) typesToShow.push('class');
+            if (filterTypedef.checked) typesToShow.push('typedef');
+            if (filterMacro.checked) typesToShow.push('macro');
+            if (filterApi.checked) typesToShow.push('api');
+          }
+          
+          // 更新节点隐藏状态
+          nodes.forEach(node => {
+            if (shouldShowAll) {
+              node.hidden = false;
+            } else {
+              node.hidden = !typesToShow.includes(node.nodeType);
+            }
+          });
+          
+          // 更新连接的隐藏状态
+          links.forEach(link => {
+            const sourceNode = nodes.find(n => n.id === link.source);
+            const targetNode = nodes.find(n => n.id === link.target);
+            
+            if (shouldShowAll) {
+              link.hidden = false;
+            } else if (sourceNode && targetNode) {
+              // 如果源节点或目标节点任一隐藏，则隐藏连接
+              link.hidden = sourceNode.hidden || targetNode.hidden;
+            }
+          });
+          
+          // 更新图表
+          if (myChart) {
+            myChart.setOption({
+              series: [{
+                data: nodes.map(node => ({
+                  ...node,
+                  itemStyle: {
+                    ...node.itemStyle,
+                    opacity: node.hidden ? 0 : node.itemStyle.opacity
+                  },
+                  label: {
+                    ...node.label,
+                    show: !node.hidden && node.label.show
+                  }
+                })),
+                links: links.map(link => ({
+                  ...link,
+                  lineStyle: {
+                    ...link.lineStyle,
+                    opacity: link.hidden ? 0 : link.lineStyle.opacity,
+                    width: link.hidden ? 0 : link.lineStyle.width
+                  }
+                }))
+              }]
+            });
+          }
+          
+          // 更新小地图
+          updateMiniMap();
+        }
+        
+        // 初始化图表
+        function initializeChart() {
+          // 设置ECharts配置
+          const option = {
+            backgroundColor: '#1e1e2e',
+            tooltip: {
+              formatter: function(params) {
+                if (params.dataType === 'node') {
+                  const data = params.data;
+                  const nodeTypeInfo = nodeTypeConfig[data.nodeType];
+                  let statusText = '';
+                  
+                  if (data.status === 'analyzing') {
+                    statusText = `<div style="color:#ff4d4f;">正在分析中 (${data.progress}%)</div>`;
+                  } else if (data.status === 'partial') {
+                    statusText = `<div style="color:#fa8c16;">部分分析完成 (阶段 ${data.currentPhase}/${data.requiredPhases})</div>`;
+                  } else if (data.status === 'completed') {
+                    statusText = `<div style="color:#52c41a;">分析完成 (100%)</div>`;
+                  } else {
+                    statusText = '<div style="color:#d9d9d9;">等待分析</div>';
+                  }
+                  
+                  return `
+                    <div style="font-family:'JetBrains Mono', monospace;">
+                      <div style="font-weight:bold;">${data.name}</div>
+                      <div>类型: ${nodeTypeInfo.name}</div>
+                      <div>复杂度: ${data.complexity === 'high' ? '高' : data.complexity === 'medium' ? '中' : '低'}</div>
+                      <div>分析阶段: ${data.requiredPhases}</div>
+                      ${statusText}
+                    </div>
+                  `;
+                } else if (params.dataType === 'edge') {
+                  const source = nodes.find(n => n.id === params.data.source);
+                  const target = nodes.find(n => n.id === params.data.target);
+                  if (source && target) {
+                    return `
+                      <div style="font-family:'JetBrains Mono', monospace;">
+                        <div style="font-weight:bold;">连接关系</div>
+                        <div>${source.name} → ${target.name}</div>
+                      </div>
+                    `;
+                  }
+                  return '';
+                }
+              }
+            },
+            animation: true,
+            animationDuration: 500,
+            series: [
+              {
+                type: 'graph',
+                layout: 'none',
+                data: nodes,
+                links: links,
+                roam: 'move',
+                draggable: true,
+                zoom: currentZoom,
+                scaleLimit: {
+                  min: minZoom,
+                  max: maxZoom
+                },
+                center: [400, 300],
+                focusNodeAdjacency: true,
+                itemStyle: {
+                  shadowBlur: 10,
+                  shadowColor: 'rgba(0, 0, 0, 0.3)'
+                },
+                lineStyle: {
+                  width: 1,
+                  curveness: 0.2,
+                  opacity: 0.6
+                },
+                label: {
+                  position: 'bottom',
+                  distance: 5,
+                  fontSize: 12,
+                  fontFamily: 'JetBrains Mono, monospace'
+                },
+                emphasis: {
+                  scale: true,
+                  focus: 'adjacency',
+                  lineStyle: {
+                    width: 2
+                  },
+                  label: {
+                    fontWeight: 'bold'
+                  }
+                },
+                edgeSymbol: ['none', 'arrow'],
+                edgeSymbolSize: [0, 5],
+                edgeLabel: {
+                  show: false
+                }
+              }
+            ]
+          };
+          
+          // 创建图表
+          if (myChart) {
+            myChart.dispose();
+          }
+          
+          myChart = echarts.init(container, null, {
+            renderer: 'canvas',
+            useDirtyRect: true
+          });
+          myChart.setOption(option);
+          
+          // 初始化小地图
+          initMiniMap();
+          
+          // 双击节点聚焦事件
+          myChart.on('dblclick', function(params) {
+            // 分析中禁止交互
+            if (analysisRunning) return;
+            
+            if (params.dataType === 'node') {
+              // 双击节点时，调整视图以聚焦这个节点
+              const nodeId = params.data.id;
+              const node = nodes.find(n => n.id === nodeId);
+              
+              if (node) {
+                myChart.dispatchAction({
+                  type: 'graphRoam',
+                  zoom: 2,
+                  moveX: container.clientWidth / 2 - node.x * 2,
+                  moveY: container.clientHeight / 2 - node.y * 2
+                });
+                
+                currentZoom = 2;
+                updateMiniMap();
+              }
+            }
+          });
+          
+          // 监听图表平移事件
+          myChart.on('graphroam', function() {
+            updateMiniMap();
+            
+            // 更新当前缩放比例
+            const option = myChart.getOption();
+            if (option.series && option.series[0] && option.series[0].zoom) {
+              currentZoom = option.series[0].zoom;
+            }
+            
+            // 更新DOM元素位置
+            updateElementPositions();
+          });
+          
+          return myChart;
+        }
+        
+        // 初始化小地图
+        function initMiniMap() {
+          if (miniMap) {
+            miniMap.dispose();
+          }
+          
+          miniMap = echarts.init(document.getElementById('mini-map-container'));
+          
+          // 创建小地图配置
+          const miniMapOption = {
+            backgroundColor: 'transparent',
+            animation: false,
+            tooltip: { show: false },
+            series: [
+              {
+                type: 'graph',
+                layout: 'none',
+                data: nodes.map(node => ({
+                  ...node,
+                  itemStyle: {
+                    color: node.originalColor,
+                    opacity: node.hidden ? 0 : 0.5,
+                    borderWidth: 0
+                  },
+                  label: { show: false },
+                  symbolSize: 8
+                })),
+                links: links.map(link => ({
+                  ...link,
+                  lineStyle: {
+                    ...link.lineStyle,
+                    width: link.hidden ? 0 : 0.5,
+                    opacity: link.hidden ? 0 : 0.3
+                  }
+                })),
+                roam: false,
+                zoom: 0.5,
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0
+              }
+            ]
+          };
+          
+          miniMap.setOption(miniMapOption);
+        }
+        
+        // 更新小地图
+        function updateMiniMap() {
+          if (!miniMap || !myChart) return;
+          
+          // 获取主图当前视图
+          const mainOption = myChart.getOption();
+          if (!mainOption.series || !mainOption.series[0]) return;
+          
+          // 更新小地图
+          miniMap.setOption({
+            series: [{
+              zoom: 0.5,
+              data: nodes.map(node => ({
+                ...node,
+                itemStyle: {
+                  color: node.status === 'completed' ? node.originalColor : 
+                         node.status === 'partial' ? mixColors('#aaaaaa', node.originalColor, 0.6) :
+                         node.status === 'analyzing' ? mixColors('#aaaaaa', node.originalColor, 0.3) : 
+                         '#aaaaaa',
+                  opacity: node.hidden ? 0 : 0.5,
+                  borderWidth: 0
+                },
+                symbolSize: 8
+              })),
+              links: links.map(link => ({
+                ...link,
+                lineStyle: {
+                  ...link.lineStyle,
+                  width: link.hidden ? 0 : 0.5,
+                  opacity: link.hidden ? 0 : 0.3
+                }
+              }))
+            }]
+          });
+        }
+        
+        // 颜色混合辅助函数
+        function mixColors(color1, color2, ratio) {
+          // 解析十六进制颜色
+          function parseColor(color) {
+            const hex = color.replace('#', '');
+            return {
+              r: parseInt(hex.substring(0, 2), 16),
+              g: parseInt(hex.substring(2, 4), 16),
+              b: parseInt(hex.substring(4, 6), 16)
+            };
+          }
+          
+          // 转换为十六进制字符串
+          function toHex(n) {
+            return Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+          }
+          
+          const c1 = parseColor(color1);
+          const c2 = parseColor(color2);
+          
+          // 混合颜色
+          const r = c1.r + (c2.r - c1.r) * ratio;
+          const g = c1.g + (c2.g - c1.g) * ratio;
+          const b = c1.b + (c2.b - c1.b) * ratio;
+          
+          return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+        }
+        
+        // 进度条和分析状态的视觉元素
+        const progressBars = {};
+        const analyzeIcons = {};
+        const phaseIndicators = {};
+        
+        // 更新DOM元素位置
+        function updateElementPositions() {
+          nodes.forEach(node => {
+            const progressBar = progressBars[node.id];
+            const icon = analyzeIcons[node.id];
+            const indicator = phaseIndicators[node.id];
+            
+            if (node.hidden) {
+              // 如果节点隐藏，也隐藏相关的DOM元素
+              if (progressBar) progressBar.style.display = 'none';
+              if (icon) icon.style.display = 'none';
+              if (indicator) indicator.style.display = 'none';
+              return;
+            }
+            
+            const domPos = myChart.convertToPixel({seriesIndex: 0}, [node.x, node.y]);
+            if (domPos) {
+              if (progressBar) {
+                progressBar.style.left = (domPos[0] - 15) + 'px';
+                progressBar.style.top = (domPos[1] + 15) + 'px';
+                progressBar.style.display = node.hidden ? 'none' : progressBar.dataset.display || 'none';
+              }
+              
+              if (icon) {
+                icon.style.left = (domPos[0] + 10) + 'px';
+                icon.style.top = (domPos[1] - 20) + 'px';
+                icon.style.display = node.hidden ? 'none' : 'block';
+              }
+              
+              if (indicator) {
+                indicator.style.left = (domPos[0] - 15) + 'px';
+                indicator.style.top = (domPos[1] + 20) + 'px';
+                indicator.style.display = node.hidden ? 'none' : 'block';
+              }
+            }
+          });
+        }
+        
+        // 初始化节点进度状态
+        function initNodeProgressElements() {
+          // 清除旧的进度元素
+          Object.values(progressBars).forEach(el => el && el.parentNode && el.parentNode.removeChild(el));
+          Object.values(analyzeIcons).forEach(el => el && el.parentNode && el.parentNode.removeChild(el));
+          Object.values(phaseIndicators).forEach(el => el && el.parentNode && el.parentNode.removeChild(el));
+          
+          // 重置状态存储
+          Object.keys(progressBars).forEach(key => delete progressBars[key]);
+          Object.keys(analyzeIcons).forEach(key => delete analyzeIcons[key]);
+          Object.keys(phaseIndicators).forEach(key => delete phaseIndicators[key]);
+          
+          // 为每个节点创建进度条
+          nodes.forEach(node => {
+            const domPos = myChart.convertToPixel({seriesIndex: 0}, [node.x, node.y]);
+            if (!domPos) return;
+            
+            // 进度条容器
+            const progressBarContainer = document.createElement('div');
+            progressBarContainer.className = 'progress-bar-container';
+            progressBarContainer.style.left = (domPos[0] - 15) + 'px';
+            progressBarContainer.style.top = (domPos[1] + 15) + 'px';
+            progressBarContainer.style.width = '30px';
+            progressBarContainer.dataset.display = 'none';
+            
+            // 进度条填充
+            const progressBarFill = document.createElement('div');
+            progressBarFill.className = 'progress-bar-fill';
+            
+            progressBarContainer.appendChild(progressBarFill);
+            container.appendChild(progressBarContainer);
+            
+            // 存储进度条引用
+            progressBars[node.id] = progressBarContainer;
+            
+            // 初始状态为隐藏
+            progressBarContainer.style.display = 'none';
+          });
+        }
+        
+        // 更新节点进度和阶段 - 修改为灰色到彩色的渐变
+        function updateNodeProgress(nodeId, progress, status, phase = null) {
+          const progressBar = progressBars[nodeId];
+          if (!progressBar) return;
+          
+          const progressFill = progressBar.firstChild;
+          const node = nodes.find(n => n.id === nodeId);
+          if (!node) return;
+          
+          // 更新节点数据
+          node.status = status;
+          node.progress = progress;
+          if (phase !== null) {
+            node.currentPhase = phase;
+          }
+          
+          // 计算颜色渐变程度
+          let colorRatio = 0;
+          
+          if (status === 'pending') {
+            colorRatio = 0; // 灰色
+          } else if (status === 'analyzing') {
+            // 分析中 - 0-25%的彩色
+            colorRatio = Math.min(0.25, (progress / 100) * 0.25);
+          } else if (status === 'partial') {
+            // 部分完成 - 25-75%的彩色，基于完成阶段
+            const baseRatio = 0.25;
+            const maxPhaseRatio = 0.75;
+            colorRatio = baseRatio + ((node.currentPhase / node.requiredPhases) * (maxPhaseRatio - baseRatio));
+          } else if (status === 'completed') {
+            colorRatio = 1.0; // 完全显示原始颜色
+          }
+          
+          // 计算当前应该显示的颜色
+          const currentColor = mixColors('#aaaaaa', node.originalColor, colorRatio);
+          
+          // 根据状态更新视觉效果
+          if (status === 'analyzing') {
+            // 显示进度条
+            progressBar.style.display = node.hidden ? 'none' : 'block';
+            progressBar.dataset.display = 'block';
+            progressFill.style.width = progress + '%';
+            
+            // 添加分析图标（旋转的齿轮）
+            if (!analyzeIcons[nodeId]) {
+              const domPos = myChart.convertToPixel({seriesIndex: 0}, [node.x, node.y]);
+              if (domPos) {
+                const icon = document.createElement('div');
+                icon.innerHTML = '⚙️';
+                icon.style.position = 'absolute';
+                icon.style.left = (domPos[0] + 10) + 'px';
+                icon.style.top = (domPos[1] - 20) + 'px';
+                icon.style.fontSize = '16px';
+                icon.className = 'analyzing-icon';
+                icon.style.display = node.hidden ? 'none' : 'block';
+                container.appendChild(icon);
+                
+                analyzeIcons[nodeId] = icon;
+              }
+            }
+            
+            // 更新节点样式 - 分析中状态
+            node.itemStyle = {
+              ...node.itemStyle,
+              color: currentColor,
+              borderColor: '#ff4d4f',
+              borderWidth: 2
+            };
+            
+          } else if (status === 'partial') {
+            // 更新进度100%
+            progressFill.style.width = '100%';
+            
+            // 颜色基于当前阶段
+            if (node.currentPhase === 1) {
+              progressFill.style.backgroundColor = '#faad14';
+            } else if (node.currentPhase === 2) {
+              progressFill.style.backgroundColor = '#fa8c16';
+            }
+            
+            // 更新节点样式 - 部分完成状态
+            const borderColor = node.currentPhase === 1 ? '#faad14' : '#fa8c16';
+            node.itemStyle = {
+              ...node.itemStyle,
+              color: currentColor,
+              borderColor: borderColor,
+              borderWidth: 2
+            };
+            
+            // 移除分析图标
+            if (analyzeIcons[nodeId]) {
+              container.removeChild(analyzeIcons[nodeId]);
+              delete analyzeIcons[nodeId];
+            }
+            
+          } else if (status === 'completed') {
+            // 更新进度100%
+            progressFill.style.width = '100%';
+            progressFill.style.backgroundColor = '#52c41a';
+            
+            // 更新节点样式 - 完成状态
+            node.itemStyle = {
+              ...node.itemStyle,
+              color: node.originalColor, // 使用原始颜色
+              borderColor: '#52c41a',
+              borderWidth: 2
+            };
+            
+            // 渐变隐藏进度条
+            setTimeout(() => {
+              progressBar.style.opacity = '0';
+              progressBar.style.transition = 'opacity 0.5s';
+              setTimeout(() => {
+                progressBar.style.display = 'none';
+                progressBar.dataset.display = 'none';
+                progressBar.style.opacity = '1';
+              }, 500);
+            }, 500);
+            
+            // 移除分析图标
+            if (analyzeIcons[nodeId]) {
+              container.removeChild(analyzeIcons[nodeId]);
+              delete analyzeIcons[nodeId];
+            }
+            
+          } else if (status === 'pending') {
+            // 重置状态
+            progressBar.style.display = 'none';
+            progressBar.dataset.display = 'none';
+            progressFill.style.width = '0%';
+            
+            // 更新节点样式 - 恢复初始灰色状态
+            node.itemStyle = {
+              ...node.itemStyle,
+              color: '#aaaaaa', // 灰色
+              borderColor: '#888888',
+              borderWidth: 1
+            };
+            
+            // 移除分析图标
+            if (analyzeIcons[nodeId]) {
+              container.removeChild(analyzeIcons[nodeId]);
+              delete analyzeIcons[nodeId];
+            }
+          }
+          
+          // 更新与此节点相关的边
+          updateRelatedEdges(nodeId);
+          
+          // 批量更新图表
+          myChart.setOption({
+            series: [{
+              data: nodes
+            }]
+          });
+          
+          // 更新统计信息
+          updateStats();
+          
+          // 更新小地图
+          updateMiniMap();
+        }
+        
+        // 更新与节点相关的边
+        function updateRelatedEdges(nodeId) {
+          // 找出与该节点相关的所有边
+          const relatedLinks = links.filter(link => 
+            link.source === nodeId || link.target === nodeId
+          );
+          
+          relatedLinks.forEach(link => {
+            const sourceNode = nodes.find(n => n.id === link.source);
+            const targetNode = nodes.find(n => n.id === link.target);
+            
+            if (!sourceNode || !targetNode) return;
+            
+            // 边的颜色状态取决于源节点和目标节点的状态
+            if (sourceNode.status === 'completed' && targetNode.status === 'completed') {
+              // 如果两个节点都已分析完成，则显示原始颜色
+              link.lineStyle.color = link.originalColor;
+            } else {
+              // 否则计算混合颜色
+              // 根据源节点和目标节点的完成度决定颜色混合比例
+              let sourceRatio = 0, targetRatio = 0;
+              
+              if (sourceNode.status === 'completed') sourceRatio = 1;
+              else if (sourceNode.status === 'partial') sourceRatio = 0.5;
+              else if (sourceNode.status === 'analyzing') sourceRatio = 0.2;
+              
+              if (targetNode.status === 'completed') targetRatio = 1;
+              else if (targetNode.status === 'partial') targetRatio = 0.5;
+              else if (targetNode.status === 'analyzing') targetRatio = 0.2;
+              
+              // 取较低的比例
+              const ratio = Math.min(sourceRatio, targetRatio);
+              
+              // 计算混合颜色
+              link.lineStyle.color = mixColors('#aaaaaa', link.originalColor, ratio);
+            }
+          });
+          
+          // 更新图表中的边
+          myChart.setOption({
+            series: [{
+              links: links
+            }]
+          });
+        }
+        
+        // 更新统计数据
+        function updateStats() {
+          const pendingCount = nodes.filter(n => n.status === 'pending').length;
+          const analyzingCount = nodes.filter(n => n.status === 'analyzing').length;
+          const partialCount = nodes.filter(n => n.status === 'partial').length;
+          const completedCount = nodes.filter(n => n.status === 'completed').length;
+          
+          // 计算总体进度
+          let totalProgress = 0;
+          nodes.forEach(node => {
+            if (node.status === 'completed') {
+              totalProgress += 100;
+            } else if (node.status === 'partial') {
+              // 每个阶段占总进度的一部分
+              totalProgress += (node.currentPhase / node.requiredPhases) * 100;
+            } else if (node.status === 'analyzing') {
+              // 分析中的进度
+              const phaseProgress = node.progress / 100;
+              const currentPhaseContribution = phaseProgress / node.requiredPhases;
+              const previousPhasesContribution = (node.currentPhase / node.requiredPhases);
+              totalProgress += previousPhasesContribution * 100 + currentPhaseContribution * 100;
+            }
+          });
+          
+          totalProgress = Math.round(totalProgress / nodes.length);
+          
+          // 更新DOM
+          document.getElementById('pending-count').textContent = pendingCount;
+          document.getElementById('analyzing-count').textContent = analyzingCount;
+          document.getElementById('partial-count').textContent = partialCount;
+          document.getElementById('completed-count').textContent = completedCount;
+          document.getElementById('total-progress').textContent = totalProgress + '%';
+          
+          // 更新解析信息
+          revealInfo.textContent = `代码结构解析进度: ${totalProgress}%`;
+          revealInfo.style.display = 'block';
+          
+          if (totalProgress >= 100) {
+            revealInfo.textContent = '代码结构解析完成';
+            // 3秒后隐藏提示
+            setTimeout(() => {
+              revealInfo.style.opacity = '0';
+              revealInfo.style.transition = 'opacity 1s';
+            }, 3000);
+          }
+          
+          // 检查是否所有节点完成分析
+          if (pendingCount === 0 && analyzingCount === 0 && partialCount === 0) {
+            if (analysisRunning) {
+              statusEl.textContent = "分析完成！所有代码结构已解析";
+              analysisRunning = false;
+              continueButton.disabled = true;
+              
+              // 恢复交互功能
+              setInteractionEnabled(true);
+              
+              // 停止所有线程
+              threadPool.forEach(thread => thread.stop());
+              threadPool.length = 0;
+            }
+          } else if (pendingCount === 0 && analyzingCount === 0 && partialCount > 0) {
+            // 有部分分析的节点，启用继续分析按钮
+            continueButton.disabled = false;
+          } else {
+            continueButton.disabled = true;
+          }
+        }
+        
+        // 模拟线程分析逻辑
+        let analysisRunning = false;
+        const threadPool = [];
+        const priorityAnalysisQueue = []; // 优先分析队列
+        
+        // 重置所有节点状态
+        function resetAllNodes() {
+          nodes.forEach(node => {
+            node.currentPhase = 0;
+            node.status = 'pending';
+            node.progress = 0;
+            
+            // 重置节点样式到初始灰色状态
+            node.itemStyle = {
+              color: '#aaaaaa', // 灰色
+              borderColor: '#888888',
+              borderWidth: 1,
+              opacity: 0.8,
+              shadowBlur: 0
+            };
+            
+            updateNodeProgress(node.id, 0, 'pending');
+          });
+          
+          // 重置所有边为灰色
+          links.forEach(link => {
+            link.lineStyle.color = '#aaaaaa';
+          });
+          
+          // 更新图表
+          myChart.setOption({
+            series: [{
+              data: nodes,
+              links: links
+            }]
+          });
+          
+          priorityAnalysisQueue.length = 0;
+          updateStats();
+          
+          // 初始化并显示解析提示
+          revealInfo.style.display = 'block';
+          revealInfo.style.opacity = '1';
+          revealInfo.textContent = '代码结构解析进度: 0%';
+          
+          // 更新小地图
+          updateMiniMap();
+        }
+        
+        // 线程工作函数
+        function analysisThread(threadId) {
+          let running = true;
+          
+          const threadFunction = async () => {
+            console.log(`线程 ${threadId} 已启动`);
+            
+            while (running && analysisRunning) {
+              // 优先从优先队列中获取节点
+              let nextNode = null;
+              
+              if (priorityAnalysisQueue.length > 0) {
+                nextNode = priorityAnalysisQueue.shift();
+              } else {
+                // 否则获取下一个待分析节点或部分分析的节点
+                nextNode = getNextNodeToAnalyze();
+              }
+              
+              if (!nextNode) {
+                console.log(`线程 ${threadId} 没有更多节点需要分析`);
+                await new Promise(resolve => setTimeout(resolve, 100));
+                continue;
+              }
+              
+              // 开始分析
+              await analyzeNode(nextNode);
+            }
+          };
+          
+          // 返回控制接口
+          return {
+            start: () => {
+              running = true;
+              threadFunction();
+            },
+            stop: () => {
+              running = false;
+            }
+          };
+        }
+        
+        // 获取下一个需要分析的节点
+        function getNextNodeToAnalyze() {
+          // 只考虑未隐藏的节点
+          const pendingNodes = nodes.filter(node => node.status === 'pending' && !node.hidden);
+          const partialNodes = nodes.filter(node => node.status === 'partial' && !node.hidden);
+          
+          // 分析模式决定优先级
+          const analysisMode = document.getElementById('analysisMode').value;
+          
+          if (analysisMode === 'progressive') {
+            // 递进式模式：先分析所有待分析节点的第一阶段，然后再进行后续阶段
+            if (pendingNodes.length > 0) {
+              // 随机选择一个待分析节点
+              const randomIndex = Math.floor(Math.random() * pendingNodes.length);
+              return pendingNodes[randomIndex];
+            } else if (partialNodes.length > 0) {
+              // 找出当前阶段最低的节点进行分析
+              partialNodes.sort((a, b) => a.currentPhase - b.currentPhase);
+              return partialNodes[0];
+            }
+          } else {
+            // 完整分析模式：优先完成一个节点的所有阶段再进行下一个
+            if (partialNodes.length > 0) {
+              // 随机选择一个部分分析的节点
+              const randomIndex = Math.floor(Math.random() * partialNodes.length);
+              return partialNodes[randomIndex];
+            } else if (pendingNodes.length > 0) {
+              // 随机选择一个待分析节点
+              const randomIndex = Math.floor(Math.random() * pendingNodes.length);
+              return pendingNodes[randomIndex];
+            }
+          }
+          
+          return null;
+        }
+        
+        // 分析单个节点 - 快速版本
+        async function analyzeNode(node) {
+          // 确定当前要进行的分析阶段
+          const currentPhase = node.currentPhase; // 0表示未开始，1表示第一阶段已完成
+          const nextPhase = currentPhase + 1;
+          const totalPhases = node.requiredPhases;
+          
+          if (nextPhase > totalPhases) {
+            console.log(`节点 ${node.name} 已完成所有阶段`);
+            return;
+          }
+          
+          // 设置为分析中状态
+          updateNodeProgress(node.id, 0, 'analyzing', currentPhase);
+          
+          // 分析时间基于节点类型和阶段 - 快速版本
+          const baseTime = {
+            'function': 100,
+            'variable': 50,
+            'class': 150,
+            'typedef': 75,
+            'macro': 40,
+            'api': 80
+          };
+          
+          // 后续阶段通常更复杂
+          const phaseMultiplier = nextPhase === 1 ? 1 : nextPhase === 2 ? 1.5 : 2;
+          
+          // 模拟分析过程
+          const analysisDuration = baseTime[node.nodeType] * phaseMultiplier + Math.random() * 50;
+          const updateInterval = 10;
+          const steps = analysisDuration / updateInterval;
+          
+          for (let i = 1; i <= steps; i++) {
+            if (!analysisRunning) {
+              // 分析被中断
+              break;
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, updateInterval));
+            
+            const progress = Math.min(100, Math.round((i / steps) * 100));
+            updateNodeProgress(node.id, progress, 'analyzing', currentPhase);
+          }
+          
+          // 如果分析没有被中断，则标记为部分完成或完全完成
+          if (analysisRunning) {
+            if (nextPhase === totalPhases) {
+              // 最后一个阶段，标记为完成
+              updateNodeProgress(node.id, 100, 'completed', nextPhase);
+            } else {
+              // 还有后续阶段，标记为部分完成
+              updateNodeProgress(node.id, 100, 'partial', nextPhase);
+            }
+          }
+        }
+        
+        // 初始化图表并设置事件
+        myChart = initializeChart();
+        initNodeProgressElements();
+        updateNodeVisibility();
+        
+        // 控制面板逻辑
+        document.getElementById('startAnalysis').addEventListener('click', () => {
+          if (analysisRunning) return;
+          
+          const threadCount = parseInt(document.getElementById('threadCount').value);
+          analysisRunning = true;
+          statusEl.textContent = `解析启动: ${threadCount}线程并行分析中`;
+          
+          // 禁用交互功能
+          setInteractionEnabled(false);
+          
+          // 初始化进度元素
+          initNodeProgressElements();
+          
+          // 重置所有节点状态
+          resetAllNodes();
+          
+          // 启动分析线程
+          for (let i = 0; i < threadCount; i++) {
+            const thread = analysisThread(i);
+            threadPool.push(thread);
+            thread.start();
+          }
+        });
+        
+        document.getElementById('stopAnalysis').addEventListener('click', () => {
+          analysisRunning = false;
+          statusEl.textContent = "分析已暂停";
+          
+          // 恢复交互功能
+          setInteractionEnabled(true);
+          
+          // 停止所有线程
+          threadPool.forEach(thread => thread.stop());
+          threadPool.length = 0;
+        });
+        
+        document.getElementById('continueAnalysis').addEventListener('click', () => {
+          if (analysisRunning) return;
+          
+          const threadCount = parseInt(document.getElementById('threadCount').value);
+          analysisRunning = true;
+          statusEl.textContent = `继续深入分析: ${threadCount}线程并行分析中`;
+          
+          // 禁用交互功能
+          setInteractionEnabled(false);
+          
+          // 按钮禁用
+          continueButton.disabled = true;
+          
+          // 启动分析线程
+          for (let i = 0; i < threadCount; i++) {
+            const thread = analysisThread(i);
+            threadPool.push(thread);
+            thread.start();
+          }
+        });
+        
+        // 初始化统计信息
+        updateStats();
+        
+      } catch (error) {
+        console.error('初始化错误:', error);
+        statusEl.textContent = `错误: ${error.message}`;
+      }
+    });
+  </script>
+
+
+</body></html>
